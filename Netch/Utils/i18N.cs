@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Windows.Forms;
 using Netch.Properties;
 using Newtonsoft.Json;
 
@@ -11,7 +12,6 @@ namespace Netch.Utils
 {
     public static class i18N
     {
-
         /// <summary>
         ///     数据
         /// </summary>
@@ -49,6 +49,12 @@ namespace Netch.Utils
             {
                 // 从外置文件中加载语言
                 text = File.ReadAllText($"i18n\\{langCode}");
+            }
+            else
+            {
+                Logging.Error($"无法找到语言 {langCode}, 使用系统语言");
+                // 加载系统语言
+                LangCode = CultureInfo.CurrentCulture.Name;
             }
 
             var data = JsonConvert.DeserializeObject<Dictionary<string, string>>(text);
@@ -98,6 +104,28 @@ namespace Netch.Utils
             if (!Directory.Exists("i18n")) return translateFile;
             translateFile.AddRange(Directory.GetFiles("i18n", "*").Select(fileName => fileName.Substring(5)));
             return translateFile;
+        }
+
+        public static void TranslateForm(in Control c)
+        {
+            Utils.ComponentIterator(c, component =>
+            {
+                switch (component)
+                {
+                    case TextBoxBase _:
+                    case ListControl _:
+                        break;
+                    case Control c:
+                        c.Text = Translate(c.Text);
+                        break;
+                    case ToolStripItem c:
+                        c.Text = Translate(c.Text);
+                        break;
+                    case ColumnHeader c:
+                        c.Text = Translate(c.Text);
+                        break;
+                }
+            });
         }
     }
 }

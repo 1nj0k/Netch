@@ -1,6 +1,8 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Netch.Controllers;
 using Netch.Forms;
@@ -16,11 +18,46 @@ namespace Netch
         [STAThread]
         public static void Main(string[] args)
         {
+            if (args.Contains("-console"))
+            {
+                if (!NativeMethods.AttachConsole(-1))
+                {
+                    NativeMethods.AllocConsole();
+                }
+            }
+
             // 创建互斥体防止多次运行
             using (var mutex = new Mutex(false, "Global\\Netch"))
             {
                 // 设置当前目录
-                Directory.SetCurrentDirectory(Application.StartupPath);
+                Directory.SetCurrentDirectory(Global.NetchDir);
+                Environment.SetEnvironmentVariable("PATH", Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Process) + ";" + Path.Combine(Global.NetchDir, "bin"), EnvironmentVariableTarget.Process);
+
+                // 预创建目录
+                var directories = new[] {"mode", "data", "i18n", "logging"};
+                foreach (var item in directories)
+                {
+                    if (!Directory.Exists(item))
+                    {
+                        Directory.CreateDirectory(item);
+                    }
+                }
+
+                // 加载配置
+                Configuration.Load();
+
+                // 加载语言
+                i18N.Load(Global.Settings.Language);
+
+                // 检查是否已经运行
+                if (!mutex.WaitOne(0, false))
+                {
+                    OnlyInstance.Send(OnlyInstance.Commands.Show);
+                    Logging.Info("唤起单实例");
+
+                    // 退出进程
+                    Environment.Exit(1);
+                }
 
                 // 清理上一次的日志文件，防止淤积占用磁盘空间
                 if (Directory.Exists("logging"))
@@ -38,38 +75,16 @@ namespace Netch
                     }
                 }
 
-                // 预创建目录
-                var directories = new[] { "mode", "data", "i18n", "logging" };
-                foreach (var item in directories)
+                Logging.Info($"版本: {UpdateChecker.Owner}/{UpdateChecker.Repo}@{UpdateChecker.Version}");
+                Task.Run(() =>
                 {
-                    // 检查是否已经存在
-                    if (!Directory.Exists(item))
-                    {
-                        // 创建目录
-                        Directory.CreateDirectory(item);
-                    }
-                }
-
-                // 加载配置
-                Configuration.Load();
-
-                // 加载语言
-                i18N.Load(Global.Settings.Language);
-
-                // 记录当前系统语言
-                Logging.Info($"当前语言：{Global.Settings.Language}");
-                Logging.Info($"版本:{UpdateChecker.Owner}/{UpdateChecker.Repo} {UpdateChecker.Version}");
-                Logging.Info($"主程序创建日期:{File.GetCreationTime(Global.NetchDir + "\\Netch.exe"):yyyy-M-d HH:mm}");
-
-                // 检查是否已经运行
-                if (!mutex.WaitOne(0, false))
+                    Logging.Info($"主程序 SHA256: {Utils.Utils.SHA256CheckSum(Application.ExecutablePath)}");
+                });
+                Task.Run(() =>
                 {
-                    // 弹出提示
-                    MessageBoxX.Show(i18N.Translate("Netch is already running"));
-
-                    // 退出进程
-                    Environment.Exit(1);
-                }
+                    Logging.Info("启动单实例");
+                    OnlyInstance.Server();
+                });
 
                 // 绑定错误捕获
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
@@ -83,11 +98,8 @@ namespace Netch
 
         public static void Application_OnException(object sender, ThreadExceptionEventArgs e)
         {
-            if (!e.Exception.ToString().Contains("ComboBox"))
-            {
-                MessageBox.Show(e.Exception.ToString(), "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            //Application.Exit();
+            Logging.Error(e.Exception.ToString());
+            Utils.Utils.Open(Logging.LogFile);
         }
     }
 }

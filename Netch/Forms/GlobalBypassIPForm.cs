@@ -14,10 +14,7 @@ namespace Netch.Forms
 
         private void GlobalBypassIPForm_Load(object sender, EventArgs e)
         {
-            Text = i18N.Translate(Text);
-            AddButton.Text = i18N.Translate(AddButton.Text);
-            DeleteButton.Text = i18N.Translate(DeleteButton.Text);
-            ControlButton.Text = i18N.Translate(ControlButton.Text);
+            i18N.TranslateForm(this);
 
             IPListBox.Items.AddRange(Global.Settings.BypassIPs.ToArray());
 
@@ -26,11 +23,6 @@ namespace Netch.Forms
                 PrefixComboBox.Items.Add(i);
             }
             PrefixComboBox.SelectedIndex = 0;
-        }
-
-        private void GlobalBypassIPForm_FormClosing(object sender, FormClosingEventArgs e)
-        {
-            Global.SettingForm.Show();
         }
 
         private void AddButton_Click(object sender, EventArgs e)

@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using Netch.Models;
 using Netch.Utils;
 
@@ -11,13 +13,103 @@ namespace Netch.Forms
 
     partial class MainForm
     {
+        private bool IsWaiting => State == State.Waiting || State == State.Stopped;
+
+        private State _state = State.Waiting;
+
         /// <summary>
         ///     当前状态
         /// </summary>
-        public State State { get; private set; } = State.Waiting;
+        public State State
+        {
+            get => _state;
+            private set
+            {
+                void StartDisableItems(bool enabled)
+                {
+                    ServerComboBox.Enabled =
+                        ModeComboBox.Enabled =
+                            EditModePictureBox.Enabled =
+                                EditServerPictureBox.Enabled =
+                                    DeleteModePictureBox.Enabled =
+                                        DeleteServerPictureBox.Enabled = enabled;
+
+                    // 启动需要禁用的控件
+                    UninstallServiceToolStripMenuItem.Enabled =
+                        UpdateACLToolStripMenuItem.Enabled =
+                            updateACLWithProxyToolStripMenuItem.Enabled =
+                                updatePACToolStripMenuItem.Enabled =
+                                    UpdateServersFromSubscribeLinksToolStripMenuItem.Enabled =
+                                        UninstallTapDriverToolStripMenuItem.Enabled =
+                                            ReloadModesToolStripMenuItem.Enabled = enabled;
+                }
+
+                _state = value;
+
+                StatusText();
+                switch (value)
+                {
+                    case State.Waiting:
+                        ControlButton.Enabled = true;
+                        ControlButton.Text = i18N.Translate("Start");
+
+                        break;
+                    case State.Starting:
+                        ControlButton.Enabled = false;
+                        ControlButton.Text = "...";
+
+                        ProfileGroupBox.Enabled = false;
+                        StartDisableItems(false);
+                        break;
+                    case State.Started:
+                        ControlButton.Enabled = true;
+                        ControlButton.Text = i18N.Translate("Stop");
+
+                        StatusTextAppend(StatusPortInfoText.Value);
+
+                        ProfileGroupBox.Enabled = true;
+
+                        break;
+                    case State.Stopping:
+                        ControlButton.Enabled = false;
+                        ControlButton.Text = "...";
+
+                        ProfileGroupBox.Enabled = false;
+                        BandwidthState(false);
+                        NatTypeStatusText();
+                        break;
+                    case State.Stopped:
+                        ControlButton.Enabled = true;
+                        ControlButton.Text = i18N.Translate("Start");
+
+                        LastUploadBandwidth = 0;
+                        LastDownloadBandwidth = 0;
+                        Bandwidth.Stop();
+
+                        ProfileGroupBox.Enabled = true;
+                        StartDisableItems(true);
+                        break;
+                    case State.Terminating:
+                        Dispose();
+                        Environment.Exit(Environment.ExitCode);
+                        return;
+                }
+            }
+        }
+
+        public void BandwidthState(bool state)
+        {
+            UsedBandwidthLabel.Visible /*= UploadSpeedLabel.Visible*/ = DownloadSpeedLabel.Visible = state;
+        }
 
         public void NatTypeStatusText(string text = "", string country = "")
         {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<string, string>(NatTypeStatusText), text, country);
+                return;
+            }
+
             if (State != State.Started)
             {
                 NatTypeStatusLabel.Text = "";
@@ -27,19 +119,9 @@ namespace Netch.Forms
 
             if (!string.IsNullOrEmpty(text))
             {
-                if (country != "")
-                {
-                    NatTypeStatusLabel.Text = String.Format("NAT{0}{1}[{2}]", i18N.Translate(": "), text, country);
-                }
-                else
-                {
-                    NatTypeStatusLabel.Text = String.Format("NAT{0}{1}", i18N.Translate(": "), text);
-                }
-                if (Enum.TryParse(text, false, out STUN_Client.NatType natType))
-                {
-                    NatTypeStatusLightLabel.Visible = true;
-                    UpdateNatTypeLight(natType);
-                }
+                NatTypeStatusLabel.Text = $"NAT{i18N.Translate(": ")}{text} {(country != string.Empty ? $"[{country}]" : "")}";
+
+                UpdateNatTypeLight(int.TryParse(text, out var natType) ? natType : -1);
             }
             else
             {
@@ -53,121 +135,105 @@ namespace Netch.Forms
         ///     更新 NAT指示灯颜色
         /// </summary>
         /// <param name="natType"></param>
-        private void UpdateNatTypeLight(STUN_Client.NatType natType)
+        private void UpdateNatTypeLight(int natType = -1)
         {
-            Color c;
-            switch (natType)
+            if (natType > 0 && natType < 5)
             {
-                case STUN_Client.NatType.UdpBlocked:
-                case STUN_Client.NatType.SymmetricUdpFirewall:
-                case STUN_Client.NatType.Symmetric:
-                    c = Color.Red;
-                    break;
-                case STUN_Client.NatType.RestrictedCone:
-                case STUN_Client.NatType.PortRestrictedCone:
-                    c = Color.Yellow;
-                    break;
-                case STUN_Client.NatType.OpenInternet:
-                case STUN_Client.NatType.FullCone:
-                    c = Color.LimeGreen;
-                    break;
-                default:
-                    c = Color.Black;
-                    break;
+                NatTypeStatusLightLabel.Visible = Global.Flags.IsWindows10Upper;
+                Color c;
+                switch (natType)
+                {
+                    case 1:
+                        c = Color.LimeGreen;
+                        break;
+                    case 2:
+                        c = Color.Yellow;
+                        break;
+                    case 3:
+                        c = Color.Red;
+                        break;
+                    case 4:
+                        c = Color.Black;
+                        break;
+                    default:
+                        c = Color.Black;
+                        break;
+                }
+
+                NatTypeStatusLightLabel.ForeColor = c;
             }
-
-            NatTypeStatusLightLabel.ForeColor = c;
+            else
+            {
+                NatTypeStatusLightLabel.Visible = false;
+            }
         }
-
 
         /// <summary>
         ///     更新状态栏文本
         /// </summary>
         /// <param name="text"></param>
-        public void StatusText(string text)
+        public void StatusText(string text = null)
         {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<string>(StatusText), text);
+                return;
+            }
+
+            text ??= i18N.Translate(StateExtension.GetStatusString(State));
             StatusLabel.Text = i18N.Translate("Status", ": ") + text;
         }
 
-        /// <summary>
-        ///     更新 UI, 状态栏文本, 状态
-        /// </summary>
-        /// <param name="state"></param>
-        /// <param name="text"></param>
-        private void UpdateStatus(State state, string text = "")
+        public void StatusTextAppend(string text)
         {
-            State = state;
-            StatusText(text == "" ? i18N.Translate(StateExtension.GetStatusString(state)) : text);
-
-            void MenuStripsEnabled(bool enabled)
-            {
-                // 需要禁用的菜单项
-                UninstallServiceToolStripMenuItem.Enabled =
-                    updateACLWithProxyToolStripMenuItem.Enabled =
-                        UpdateServersFromSubscribeLinksToolStripMenuItem.Enabled =
-                            reinstallTapDriverToolStripMenuItem.Enabled = enabled;
-            }
-
-            // TODO 补充
-            switch (state)
-            {
-                case State.Waiting:
-                    ControlButton.Enabled = true;
-                    ControlButton.Text = i18N.Translate("Start");
-
-                    break;
-                case State.Starting:
-                    ControlButton.Enabled = false;
-                    ControlButton.Text = "...";
-
-                    ConfigurationGroupBox.Enabled = false;
-
-                    MenuStripsEnabled(false);
-                    break;
-                case State.Started:
-                    ControlButton.Enabled = true;
-                    ControlButton.Text = i18N.Translate("Stop");
-
-                    LastUploadBandwidth = 0;
-                    //LastDownloadBandwidth = 0;
-                    //UploadSpeedLabel.Text = "↑: 0 KB/s";
-                    DownloadSpeedLabel.Text = @"↑↓: 0 KB/s";
-                    UsedBandwidthLabel.Text = $@"{i18N.Translate("Used", ": ")}0 KB";
-                    UsedBandwidthLabel.Visible /*= UploadSpeedLabel.Visible*/ = DownloadSpeedLabel.Visible = true;
-                    break;
-                case State.Stopping:
-                    ControlButton.Enabled = false;
-                    ControlButton.Text = "...";
-
-                    ProfileGroupBox.Enabled = false;
-
-                    UsedBandwidthLabel.Visible /*= UploadSpeedLabel.Visible*/ = DownloadSpeedLabel.Visible = false;
-                    NatTypeStatusText();
-                    break;
-                case State.Stopped:
-                    ControlButton.Enabled = true;
-                    ControlButton.Text = i18N.Translate("Start");
-
-                    LastUploadBandwidth = 0;
-                    LastDownloadBandwidth = 0;
-
-                    ProfileGroupBox.Enabled = true;
-                    ConfigurationGroupBox.Enabled = true;
-
-                    MenuStripsEnabled(true);
-                    break;
-                case State.Terminating:
-
-                    break;
-            }
+            StatusLabel.Text += text;
         }
 
-        /// <summary>
-        ///     刷新 UI
-        /// </summary>
-        private void UpdateStatus()
+        public static class StatusPortInfoText
         {
-            UpdateStatus(State);
+            private static ushort? _socks5Port;
+            private static ushort? _httpPort;
+            private static bool _shareLan;
+
+            public static ushort HttpPort
+            {
+                set => _httpPort = value;
+            }
+
+            public static ushort Socks5Port
+            {
+                set => _socks5Port = value;
+            }
+
+            public static void UpdateShareLan() => _shareLan = Global.Settings.LocalAddress != "127.0.0.1";
+
+            public static string Value
+            {
+                get
+                {
+                    var strings = new List<string>();
+
+                    if (_socks5Port != null)
+                    {
+                        strings.Add($"Socks5 {i18N.Translate("Local Port", ": ")}{_socks5Port}");
+                    }
+
+                    if (_httpPort != null)
+                    {
+                        strings.Add($"HTTP {i18N.Translate("Local Port", ": ")}{_httpPort}");
+                    }
+
+                    if (!strings.Any())
+                        return string.Empty;
+
+                    return $" ({(_shareLan ? i18N.Translate("Allow other Devices to connect") + " " : "")}{string.Join(" | ", strings)})";
+                }
+            }
+
+            public static void Reset()
+            {
+                _httpPort = _socks5Port = null;
+            }
         }
     }
 }

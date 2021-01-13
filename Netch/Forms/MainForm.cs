@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -6,21 +9,17 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 using Netch.Controllers;
 using Netch.Forms.Mode;
-using Netch.Forms.Server;
 using Netch.Models;
 using Netch.Utils;
-using Trojan = Netch.Forms.Server.Trojan;
-using VMess = Netch.Forms.Server.VMess;
 
 namespace Netch.Forms
 {
     public partial class MainForm : Form
     {
-        /// <summary>
-        ///     主控制器
-        /// </summary>
-        private MainController _mainController = new MainController();
+        private readonly Dictionary<string, object> _mainFormText = new();
 
+        private bool _comboBoxInitialized;
+        private bool _textRecorded;
         public MainForm()
         {
             InitializeComponent();
@@ -28,37 +27,40 @@ namespace Netch.Forms
             // 监听电源事件
             SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
 
-            CheckForIllegalCrossThreadCalls = false;
-        }
-
-        private void SaveConfigs()
-        {
-            Global.Settings.ServerComboBoxSelectedIndex = ServerComboBox.SelectedIndex;
-            if (ModeComboBox.Items.Count != 0 && ModeComboBox.SelectedItem != null)
+            ModeComboBox.KeyUp += (sender, args) =>
             {
-                if (ModeComboBox.Tag is object[] list)
+                switch (args.KeyData)
                 {
-                    Global.Settings.ModeComboBoxSelectedIndex = list.ToList().IndexOf(ModeComboBox.SelectedItem);
+                    case Keys.Escape:
+                    {
+                        SelectLastMode();
+                        return;
+                    }
                 }
-                else
-                {
-                    Global.Settings.ModeComboBoxSelectedIndex = ModeComboBox.Items.IndexOf(ModeComboBox.SelectedItem);
-                }
-            }
+            };
 
-            Configuration.Save();
+            CheckForIllegalCrossThreadCalls = false;
         }
 
         private void MainForm_Load(object sender, EventArgs e)
         {
+            AddAddServerToolStripMenuItems();
+
+            #region i18N Translations
+
+            _mainFormText.Add(UninstallServiceToolStripMenuItem.Name, new[] {"Uninstall {0}", "NF Service"});
+            _mainFormText.Add(UninstallTapDriverToolStripMenuItem.Name, new[] {"Uninstall {0}", "TUN/TAP driver"});
+
+            #endregion
+
+            OnlyInstance.Called += OnCalled;
             // 计算 ComboBox绘制 目标宽度
             _eWidth = ServerComboBox.Width / 10;
 
-            // 加载服务器
-            InitServer();
-
-            // 加载模式
+            ModeHelper.Load();
             InitMode();
+            InitServer();
+            _comboBoxInitialized = true;
 
             // 加载翻译
             InitText();
@@ -66,19 +68,19 @@ namespace Netch.Forms
             // 隐藏 NatTypeStatusLabel
             NatTypeStatusText();
 
-            _sizeHeight = Size.Height;
             _configurationGroupBoxHeight = ConfigurationGroupBox.Height;
             _profileConfigurationHeight = ConfigurationGroupBox.Controls[0].Height / 3; // 因为 AutoSize, 所以得到的是Controls的总高度
-            _profileGroupboxHeight = ProfileGroupBox.Height;
             // 加载快速配置
             InitProfile();
 
+            // 打开软件时启动加速，产生开始按钮点击事件
+            if (Global.Settings.StartWhenOpened)
+                ControlButton.PerformClick();
 
             // 自动检测延迟
             Task.Run(() =>
             {
                 while (true)
-                {
                     if (State == State.Waiting || State == State.Stopped)
                     {
                         TestServer();
@@ -89,19 +91,36 @@ namespace Netch.Forms
                     {
                         Thread.Sleep(200);
                     }
-                }
             });
 
-            // 打开软件时启动加速，产生开始按钮点击事件
-            if (Global.Settings.StartWhenOpened)
+            Task.Run(() =>
             {
-                ControlButton.PerformClick();
-            }
+                // 检查更新
+                if (Global.Settings.CheckUpdateWhenOpened)
+                    CheckUpdate();
+            });
 
-            // 检查更新
-            if (Global.Settings.CheckUpdateWhenOpened)
+
+            Task.Run(async () =>
             {
-                CheckUpdate();
+                // 检查订阅更新
+                if (Global.Settings.UpdateServersWhenOpened)
+                    await UpdateServersFromSubscribe(Global.Settings.UseProxyToUpdateSubscription);
+            });
+        }
+
+        private void OnCalled(object sender, OnlyInstance.Commands e)
+        {
+            switch (e)
+            {
+                case OnlyInstance.Commands.Show:
+                    NotifyIcon_MouseDoubleClick(null, null);
+                    break;
+                case OnlyInstance.Commands.Exit:
+                    Exit(true);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(e), e, null);
             }
         }
 
@@ -118,16 +137,11 @@ namespace Netch.Forms
                 {
                     // 使关闭时窗口向右下角缩小的效果
                     WindowState = FormWindowState.Minimized;
-                    NotifyIcon.Visible = true;
 
                     if (_isFirstCloseWindow)
                     {
                         // 显示提示语
-                        NotifyIcon.ShowBalloonTip(5,
-                            UpdateChecker.Name,
-                            i18N.Translate("Netch is now minimized to the notification bar, double click this icon to restore."),
-                            ToolTipIcon.Info);
-
+                        NotifyTip(i18N.Translate("Netch is now minimized to the notification bar, double click this icon to restore."));
                         _isFirstCloseWindow = false;
                     }
 
@@ -136,7 +150,7 @@ namespace Netch.Forms
                 // 如果勾选了关闭时退出，自动点击退出按钮
                 else
                 {
-                    Exit(true);
+                    Exit();
                 }
             }
         }
@@ -149,285 +163,298 @@ namespace Netch.Forms
 
         private void SettingsButton_Click(object sender, EventArgs e)
         {
-            (Global.SettingForm = new SettingForm()).Show();
             Hide();
-        }
-
-
-        private void MainForm_VisibleChanged(object sender, EventArgs e)
-        {
-            if (!Visible)
-                return;
+            new SettingForm().ShowDialog();
 
             if (i18N.LangCode != Global.Settings.Language)
             {
                 i18N.Load(Global.Settings.Language);
                 InitText();
+                InitMode();
                 InitProfile();
             }
 
             if (ProfileButtons.Count != Global.Settings.ProfileCount)
                 InitProfile();
+
+            Show();
         }
 
         private void InitText()
         {
-            ServerToolStripMenuItem.Text = i18N.Translate("Server");
-            ImportServersFromClipboardToolStripMenuItem.Text = i18N.Translate("Import Servers From Clipboard");
-            AddSocks5ServerToolStripMenuItem.Text = i18N.Translate("Add [Socks5] Server");
-            AddShadowsocksServerToolStripMenuItem.Text = i18N.Translate("Add [Shadowsocks] Server");
-            AddShadowsocksRServerToolStripMenuItem.Text = i18N.Translate("Add [ShadowsocksR] Server");
-            AddVMessServerToolStripMenuItem.Text = i18N.Translate("Add [VMess] Server");
-            AddTrojanServerToolStripMenuItem.Text = i18N.Translate("Add [Trojan] Server");
-            ModeToolStripMenuItem.Text = i18N.Translate("Mode");
-            CreateProcessModeToolStripMenuItem.Text = i18N.Translate("Create Process Mode");
-            SubscribeToolStripMenuItem.Text = i18N.Translate("Subscribe");
-            ManageSubscribeLinksToolStripMenuItem.Text = i18N.Translate("Manage Subscribe Links");
-            UpdateServersFromSubscribeLinksToolStripMenuItem.Text = i18N.Translate("Update Servers From Subscribe Links");
-            OptionsToolStripMenuItem.Text = i18N.Translate("Options");
-            ReloadModesToolStripMenuItem.Text = i18N.Translate("Reload Modes");
-            UninstallServiceToolStripMenuItem.Text = i18N.Translate("Uninstall Service");
-            CleanDNSCacheToolStripMenuItem.Text = i18N.Translate("Clean DNS Cache");
-            UpdateACLToolStripMenuItem.Text = i18N.Translate("Update ACL");
-            updateACLWithProxyToolStripMenuItem.Text = i18N.Translate("Update ACL with proxy");
-            reinstallTapDriverToolStripMenuItem.Text = i18N.Translate("Reinstall TUN/TAP driver");
-            OpenDirectoryToolStripMenuItem.Text = i18N.Translate("Open Directory");
-            AboutToolStripButton.Text = i18N.Translate("About");
-            // VersionLabel.Text = i18N.Translate("xxx");
-            exitToolStripMenuItem.Text = i18N.Translate("Exit");
-            RelyToolStripMenuItem.Text = i18N.Translate("Unable to start? Click me to download");
-            ConfigurationGroupBox.Text = i18N.Translate("Configuration");
-            ProfileLabel.Text = i18N.Translate("Profile");
-            ModeLabel.Text = i18N.Translate("Mode");
-            ServerLabel.Text = i18N.Translate("Server");
-            // UsedBandwidthLabel.Text = i18N.Translate("Used: 0 KB");
-            // DownloadSpeedLabel.Text = i18N.Translate("↓: 0 KB/s");
-            // UploadSpeedLabel.Text = i18N.Translate("↑: 0 KB/s");
-            NotifyIcon.Text = i18N.Translate("Netch");
-            ShowMainFormToolStripButton.Text = i18N.Translate("Show");
-            ExitToolStripButton.Text = i18N.Translate("Exit");
-            SettingsButton.Text = i18N.Translate("Settings");
-            ProfileGroupBox.Text = i18N.Translate("Profiles");
-            // 加载翻译
+            #region Record English
+
+            if (!_textRecorded)
+            {
+                void RecordText(Component component)
+                {
+                    try
+                    {
+                        switch (component)
+                        {
+                            case TextBoxBase _:
+                            case ListControl _:
+                                break;
+                            case Control c:
+                                _mainFormText.Add(c.Name, c.Text);
+                                break;
+                            case ToolStripItem c:
+                                _mainFormText.Add(c.Name, c.Text);
+                                break;
+                        }
+                    }
+                    catch (ArgumentException)
+                    {
+                        // ignored
+                    }
+                }
+
+                Utils.Utils.ComponentIterator(this, RecordText);
+                Utils.Utils.ComponentIterator(NotifyMenu, RecordText);
+                _textRecorded = true;
+            }
+
+            #endregion
+
+            #region Translate
+
+            void TranslateText(Component component)
+            {
+                switch (component)
+                {
+                    case TextBoxBase _:
+                    case ListControl _:
+                        break;
+                    case Control c:
+                        if (_mainFormText.ContainsKey(c.Name))
+                            c.Text = ControlText(c.Name);
+                        break;
+                    case ToolStripItem c:
+                        if (_mainFormText.ContainsKey(c.Name))
+                            c.Text = ControlText(c.Name);
+                        break;
+                }
+
+                string ControlText(string name)
+                {
+                    var value = _mainFormText[name];
+                    if (value.Equals(string.Empty)) return string.Empty;
+
+                    if (value is object[] values)
+                        return i18N.TranslateFormat(values.First() as string, values.Skip(1).ToArray());
+                    return i18N.Translate(value);
+                }
+            }
+
+            Utils.Utils.ComponentIterator(this, TranslateText);
+            Utils.Utils.ComponentIterator(NotifyMenu, TranslateText);
+
+            #endregion
 
             UsedBandwidthLabel.Text = $@"{i18N.Translate("Used", ": ")}0 KB";
-            UpdateStatus();
-
+            State = State;
             VersionLabel.Text = UpdateChecker.Version;
         }
 
         private void Exit(bool forceExit = false)
         {
-            if (IsDisposed) return;
-
-            // 已启动
-            if (State != State.Waiting && State != State.Stopped)
+            if (!IsWaiting && !Global.Settings.StopWhenExited && !forceExit)
             {
-                if (Global.Settings.StopWhenExited || forceExit)
-                {
-                    UpdateStatus(State.Stopping);
-                    ControlFun();
-                }
-                else
-                {
-                    // 未开启自动停止
-                    MessageBoxX.Show(i18N.Translate("Please press Stop button first"));
+                MessageBoxX.Show(i18N.Translate("Please press Stop button first"));
 
-                    Visible = true;
-                    ShowInTaskbar = true; // 显示在系统任务栏 
-                    WindowState = FormWindowState.Normal; // 还原窗体 
-                    NotifyIcon.Visible = true; // 托盘图标隐藏 
-
-                    return;
-                }
+                NotifyIcon_MouseDoubleClick(null, null);
+                return;
             }
 
-            NotifyIcon.Visible = false;
             Hide();
+            NotifyIcon.Visible = false;
+            if (!IsWaiting)
+                ControlFun();
 
-            Task.Run(() =>
+            Configuration.Save();
+
+            foreach (var file in new[] {"data\\last.json", "data\\privoxy.conf"})
+                if (File.Exists(file))
+                    File.Delete(file);
+
+            State = State.Terminating;
+        }
+
+        private void ModeComboBox_SelectedIndexChanged(object sender, EventArgs o)
+        {
+            if (!_comboBoxInitialized) return;
+            try
             {
-                for (var i = 0; i < 16; i++)
-                {
-                    if (State == State.Waiting || State == State.Stopped)
-                        break;
-                    Thread.Sleep(250);
-                }
+                Global.Settings.ModeComboBoxSelectedIndex = Global.Modes.IndexOf((Models.Mode) ModeComboBox.SelectedItem);
+            }
+            catch
+            {
+                Global.Settings.ModeComboBoxSelectedIndex = 0;
+            }
+        }
 
-                SaveConfigs();
-                UpdateStatus(State.Terminating);
-                Dispose();
-                Environment.Exit(Environment.ExitCode);
-            });
+        private void ServerComboBox_SelectedIndexChanged(object sender, EventArgs o)
+        {
+            if (!_comboBoxInitialized) return;
+            Global.Settings.ServerComboBoxSelectedIndex = ServerComboBox.SelectedIndex;
+        }
+
+        private void NatTypeStatusLabel_Click(object sender, EventArgs e)
+        {
+            if (_state == State.Started && MainController.NttTested)
+                MainController.NatTest();
         }
 
         #region MISC
 
+        private bool _resumeFlag;
+
         /// <summary>
-        /// 监听电源事件，自动重启Netch服务
+        ///     监听电源事件，自动重启Netch服务
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
         private void SystemEvents_PowerModeChanged(object sender, PowerModeChangedEventArgs e)
         {
-            //不对Netch命令等待状态的电源事件做任何处理
-            if (!State.Equals(State.Waiting))
+            switch (e.Mode)
             {
-                switch (e.Mode)
-                {
-                    case PowerModes.Suspend: //操作系统即将挂起
-                        Logging.Info("操作系统即将挂起，自动停止===>" + DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss"));
+                case PowerModes.Suspend: //操作系统即将挂起
+                    if (!IsWaiting)
+                    {
+                        _resumeFlag = true;
+                        Logging.Info("操作系统即将挂起，自动停止");
                         ControlFun();
-                        break;
-                    case PowerModes.Resume: //操作系统即将从挂起状态继续
-                        Logging.Info("操作系统即将从挂起状态继续，自动重启===>" + DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss"));
+                    }
+                    break;
+                case PowerModes.Resume: //操作系统即将从挂起状态继续
+                    if (_resumeFlag)
+                    {
+                        _resumeFlag = false;
+                        Logging.Info("操作系统即将从挂起状态继续，自动重启");
                         ControlFun();
-                        break;
-                }
+                    }
+                    break;
             }
         }
 
         private void EditServerPictureBox_Click(object sender, EventArgs e)
         {
-            SaveConfigs();
             // 当前ServerComboBox中至少有一项
-            if (ServerComboBox.SelectedIndex != -1)
-            {
-                switch (Global.Settings.Server[ServerComboBox.SelectedIndex].Type)
-                {
-                    case "Socks5":
-                        new Socks5(ServerComboBox.SelectedIndex).Show();
-                        break;
-                    case "SS":
-                        new Shadowsocks(ServerComboBox.SelectedIndex).Show();
-                        break;
-                    case "SSR":
-                        new ShadowsocksR(ServerComboBox.SelectedIndex).Show();
-                        break;
-                    case "VMess":
-                        new VMess(ServerComboBox.SelectedIndex).Show();
-                        break;
-                    case "Trojan":
-                        new Trojan(ServerComboBox.SelectedIndex).Show();
-                        break;
-                    default:
-                        return;
-                }
-
-                Hide();
-            }
-            else
+            if (ServerComboBox.SelectedIndex == -1)
             {
                 MessageBoxX.Show(i18N.Translate("Please select a server first"));
+                return;
             }
+
+            Hide();
+            var server = Global.Settings.Server[ServerComboBox.SelectedIndex];
+            ServerHelper.GetUtilByTypeName(server.Type).Edit(server);
+            InitServer();
+            Configuration.Save();
+            Show();
         }
 
-        private void SpeedPictureBox_Click(object sender, EventArgs e)
+        private async void SpeedPictureBox_Click(object sender, EventArgs e)
         {
             Enabled = false;
             StatusText(i18N.Translate("Testing"));
-
-            Task.Run(() =>
+            try
             {
-                TestServer();
-
-                Enabled = true;
-                StatusText(i18N.Translate("Test done"));
+                await Task.Run(TestServer);
                 Refresh();
-            });
+                NotifyTip(i18N.Translate("Test done"));
+            }
+            finally
+            {
+                Enabled = true;
+                StatusText();
+            }
         }
 
         private void EditModePictureBox_Click(object sender, EventArgs e)
         {
             // 当前ModeComboBox中至少有一项
-            if (ModeComboBox.Items.Count > 0 && ModeComboBox.SelectedIndex != -1)
-            {
-                SaveConfigs();
-                var selectedMode = (Models.Mode) ModeComboBox.SelectedItem;
-                // 只允许修改进程加速的模式
-                if (selectedMode.Type == 0)
-                {
-                    //Process.Start(Environment.CurrentDirectory + "\\mode\\" + selectedMode.FileName + ".txt");
-                    var process = new Process(selectedMode);
-                    process.Text = "Edit Process Mode";
-                    process.Show();
-                    Hide();
-                }
-            }
-            else
+            if (ModeComboBox.SelectedIndex == -1)
             {
                 MessageBoxX.Show(i18N.Translate("Please select a mode first"));
+                return;
+            }
+
+            var mode = (Models.Mode) ModeComboBox.SelectedItem;
+            if (ModifierKeys == Keys.Control)
+            {
+                Utils.Utils.Open(ModeHelper.GetFullPath(mode.RelativePath));
+                return;
+            }
+
+            switch (mode.Type)
+            {
+                case 0:
+                    Hide();
+                    new Process(mode).ShowDialog();
+                    Show();
+                    break;
+                default:
+                    Utils.Utils.Open(ModeHelper.GetFullPath(mode.RelativePath));
+                    break;
             }
         }
 
         private void DeleteModePictureBox_Click(object sender, EventArgs e)
         {
             // 当前ModeComboBox中至少有一项
-            if (ModeComboBox.Items.Count > 0 && ModeComboBox.SelectedIndex != -1)
-            {
-                var selectedMode = (Models.Mode) ModeComboBox.SelectedItem;
-
-                //删除模式文件
-                selectedMode.DeleteFile("mode");
-
-                ModeComboBox.Items.Clear();
-                Global.ModeFiles.Remove(selectedMode);
-                var array = Global.ModeFiles.ToArray();
-                Array.Sort(array, (a, b) => string.Compare(a.Remark, b.Remark, StringComparison.Ordinal));
-                ModeComboBox.Items.AddRange(array);
-
-                SelectLastMode();
-                Configuration.Save();
-            }
-            else
+            if (ModeComboBox.Items.Count <= 0 || ModeComboBox.SelectedIndex == -1)
             {
                 MessageBoxX.Show(i18N.Translate("Please select a mode first"));
+                return;
             }
+
+            ModeHelper.Delete((Models.Mode) ModeComboBox.SelectedItem);
+            SelectLastMode();
         }
 
         private void CopyLinkPictureBox_Click(object sender, EventArgs e)
         {
             // 当前ServerComboBox中至少有一项
-            if (ServerComboBox.SelectedIndex != -1)
-            {
-                var selectedMode = (Models.Server) ServerComboBox.SelectedItem;
-                try
-                {
-                    //听说巨硬BUG经常会炸，所以Catch一下 :D
-                    Clipboard.SetText(ShareLink.GetShareLink(selectedMode));
-                }
-                catch (Exception)
-                {
-                    // ignored
-                }
-            }
-            else
+            if (ServerComboBox.SelectedIndex == -1)
             {
                 MessageBoxX.Show(i18N.Translate("Please select a server first"));
+                return;
+            }
+
+            try
+            {
+                //听说巨硬BUG经常会炸，所以Catch一下 :D
+                var server = (Server) ServerComboBox.SelectedItem;
+                string text;
+                if (ModifierKeys == Keys.Control)
+                    text = ShareLink.GetNetchLink(server);
+                else
+                    text = ShareLink.GetShareLink(server);
+
+                Clipboard.SetText(text);
+            }
+            catch (Exception)
+            {
+                // ignored
             }
         }
 
         private void DeleteServerPictureBox_Click(object sender, EventArgs e)
         {
             // 当前 ServerComboBox 中至少有一项
-            if (ServerComboBox.SelectedIndex != -1)
-            {
-                var index = ServerComboBox.SelectedIndex;
-
-                Global.Settings.Server.Remove(ServerComboBox.SelectedItem as Models.Server);
-                ServerComboBox.Items.RemoveAt(index);
-
-                if (ServerComboBox.Items.Count > 0)
-                {
-                    ServerComboBox.SelectedIndex = index != 0 ? index - 1 : index;
-                }
-
-                Configuration.Save();
-            }
-            else
+            if (ServerComboBox.SelectedIndex == -1)
             {
                 MessageBoxX.Show(i18N.Translate("Please select a server first"));
+                return;
             }
+
+            var index = ServerComboBox.SelectedIndex;
+            Global.Settings.Server.Remove(ServerComboBox.SelectedItem as Server);
+            InitServer();
+            Configuration.Save();
+            if (ServerComboBox.Items.Count > 0)
+                ServerComboBox.SelectedIndex = index != 0 ? index - 1 : index;
         }
 
         #region NotifyIcon
@@ -437,14 +464,16 @@ namespace Netch.Forms
             if (WindowState == FormWindowState.Minimized)
             {
                 Visible = true;
-                ShowInTaskbar = true; // 显示在系统任务栏 
+                ShowInTaskbar = true;                 // 显示在系统任务栏 
                 WindowState = FormWindowState.Normal; // 还原窗体 
-                NotifyIcon.Visible = true; // 托盘图标隐藏 
             }
 
             Activate();
         }
 
+        /// <summary>
+        ///     通知图标右键菜单退出
+        /// </summary>
         private void ExitToolStripButton_Click(object sender, EventArgs e)
         {
             Exit();
@@ -455,12 +484,20 @@ namespace Netch.Forms
             if (WindowState == FormWindowState.Minimized)
             {
                 Visible = true;
-                ShowInTaskbar = true; //显示在系统任务栏 
-                WindowState = FormWindowState.Normal; //还原窗体 
-                NotifyIcon.Visible = true; //托盘图标隐藏 
+                ShowInTaskbar = true;                 //显示在系统任务栏 
+                WindowState = FormWindowState.Normal; //还原窗体
             }
 
             Activate();
+        }
+
+        public void NotifyTip(string text, int timeout = 0, bool info = true)
+        {
+            // 会阻塞线程 timeout 秒
+            NotifyIcon.ShowBalloonTip(timeout,
+                UpdateChecker.Name,
+                text,
+                info ? ToolTipIcon.Info : ToolTipIcon.Error);
         }
 
         #endregion

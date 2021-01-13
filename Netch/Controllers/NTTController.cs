@@ -1,67 +1,96 @@
 ﻿using System;
-using System.Diagnostics;
-using Netch.Models;
+using System.IO;
+using System.Linq;
 using Netch.Utils;
 
 namespace Netch.Controllers
 {
-    public class NTTController : Controller
+    public class NTTController : Guard, IController
     {
-        private string _lastResult;
-
-        public NTTController()
-        {
-            Name = "NTT";
-            MainFile = "NTT.exe";
-        }
+        public override string Name { get; protected set; } = "NTT";
+        public override string MainFile { get; protected set; } = "NTT.exe";
 
         /// <summary>
         ///     启动 NatTypeTester
         /// </summary>
         /// <returns></returns>
-        public (bool, string, string, string) Start()
+        public (string, string, string) Start()
         {
+            string localEnd=null;
+            string publicEnd=null;
+            string result =null;
+            string bindingTest=null;
+
             try
             {
-                Instance = GetProcess();
-
-                Instance.StartInfo.Arguments = $" {Global.Settings.STUN_Server} {Global.Settings.STUN_Server_Port}";
-
+                InitInstance($" {Global.Settings.STUN_Server} {Global.Settings.STUN_Server_Port}");
                 Instance.OutputDataReceived += OnOutputDataReceived;
                 Instance.ErrorDataReceived += OnOutputDataReceived;
-
-                State = State.Starting;
                 Instance.Start();
-                Instance.BeginOutputReadLine();
-                Instance.BeginErrorReadLine();
-                Instance.WaitForExit();
+                var output = Instance.StandardOutput.ReadToEnd();
+                try
+                {
+                    File.WriteAllText(Path.Combine(Global.NetchDir, $"logging\\{Name}.log"), output);
+                }
+                catch (Exception e)
+                {
+                    Logging.Warning($"写入 {Name} 日志错误：\n" + e.Message);
+                }
 
-                var result = _lastResult.Split('#');
-                var natType = result[0];
-                var localEnd = result[1];
-                var publicEnd = result[2];
+                foreach (var line in output.Split('\n'))
+                {
+                    var str = line.Split(':').Select(s => s.Trim()).ToArray();
+                    if (str.Length < 2)
+                        continue;
+                    var key = str[0];
+                    var value = str[1];
+                    switch (key)
+                    {
+                        case "Other address is":
+                        case "Nat mapping behavior":
+                        case "Nat filtering behavior":
+                            break;
+                        case "Binding test":
+                            bindingTest = value;
+                            break;
+                        case "Local address":
+                            localEnd = value;
+                            break;
+                        case "Mapped address":
+                            publicEnd = value;
+                            break;
+                        case "result":
+                            result = value;
+                            break;
+                        default:
+                            result = str.Last();
+                            break;
+                    }
+                }
 
-                return (true, natType, localEnd, publicEnd);
+                if (bindingTest == "Fail")
+                    result = "UdpBlocked";
+                return (result, localEnd, publicEnd);
             }
-            catch (Exception)
+            catch (Exception e)
             {
-                Logging.Error("NTT 进程出错");
-                Stop();
-                return (false, null, null, null);
+                Logging.Error($"{Name} 控制器出错:\n" + e);
+                try
+                {
+                    Stop();
+                }
+                catch
+                {
+                    // ignored
+                }
+
+                return (null, null, null);
             }
         }
 
-        private new void OnOutputDataReceived(object sender, DataReceivedEventArgs e)
-        {
-            if (!string.IsNullOrEmpty(e.Data))
-                _lastResult = e.Data;
-        }
-
-        /// <summary>
-        ///     无用
-        /// </summary>
         public override void Stop()
         {
+            StopInstance();
         }
     }
 }
