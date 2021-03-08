@@ -8,20 +8,20 @@ namespace Netch.Utils
 {
     public static class WebUtil
     {
+        public const string DefaultUserAgent =
+            @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.67 Safari/537.36 Edg/87.0.664.55";
+
         static WebUtil()
         {
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
         }
 
-        public const string DefaultUserAgent =
-            @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.67 Safari/537.36 Edg/87.0.664.55";
-
         private static int DefaultGetTimeout => Global.Settings.RequestTimeout;
 
-        public static HttpWebRequest CreateRequest(string url, int? timeout = null, string userAgent = null)
+        public static HttpWebRequest CreateRequest(string url, int? timeout = null, string? userAgent = null)
         {
             var req = (HttpWebRequest) WebRequest.Create(url);
-            req.UserAgent = string.IsNullOrEmpty(userAgent) ? DefaultUserAgent : userAgent;
+            req.UserAgent = string.IsNullOrWhiteSpace(userAgent) ? DefaultUserAgent : userAgent;
             req.Accept = "*/*";
             req.KeepAlive = true;
             req.Timeout = timeout ?? DefaultGetTimeout;

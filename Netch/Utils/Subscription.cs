@@ -9,29 +9,27 @@ namespace Netch.Utils
 {
     public static class Subscription
     {
-        private static readonly object ServerLock = new object();
+        private static readonly object ServerLock = new();
 
-        public static async Task UpdateServersAsync(string proxyServer = default)
+        public static async Task UpdateServersAsync(string? proxyServer = default)
         {
-            await Task.WhenAll(
-                Global.Settings.SubscribeLink.Select(item =>
-                    Task.Run(() => UpdateServer(item, proxyServer))
-                ).ToArray()
-            );
+            await Task.WhenAll(Global.Settings.SubscribeLink.Select(item => Task.Run(() => UpdateServer(item, proxyServer))).ToArray());
         }
 
-        public static void UpdateServer(SubscribeLink item, string proxyServer)
+        public static void UpdateServer(SubscribeLink item, string? proxyServer)
         {
             try
             {
                 if (!item.Enable)
-                {
                     return;
-                }
+
                 var request = WebUtil.CreateRequest(item.Link);
 
-                if (!string.IsNullOrEmpty(item.UserAgent)) request.UserAgent = item.UserAgent;
-                if (!string.IsNullOrEmpty(proxyServer)) request.Proxy = new WebProxy(proxyServer);
+                if (!string.IsNullOrEmpty(item.UserAgent))
+                    request.UserAgent = item.UserAgent;
+
+                if (!string.IsNullOrEmpty(proxyServer))
+                    request.Proxy = new WebProxy(proxyServer);
 
                 List<Server> servers;
 
@@ -41,7 +39,8 @@ namespace Netch.Utils
                 else
                     throw new Exception($"{item.Remark} Response Status Code: {rep.StatusCode}");
 
-                foreach (var server in servers) server.Group = item.Remark;
+                foreach (var server in servers)
+                    server.Group = item.Remark;
 
                 lock (ServerLock)
                 {

@@ -49,8 +49,7 @@ As well, Netch avoid the restricted NAT problem caused by SSTap. You can use an 
 ![](docs/screenshots/main.png)
 
 ## Requirements
-- Microsoft Visual C++ Runtime
-- [.NET Framework 4.8](https://dotnet.microsoft.com/download/dotnet-framework/net48)
+- [.NET Framework 4.8 (Included in Windows 10 1903+)](https://dotnet.microsoft.com/download/dotnet-framework/net48)
 
 ## Quote
 - [core](https://github.com/aiocloud/core)
@@ -59,7 +58,7 @@ As well, Netch avoid the restricted NAT problem caused by SSTap. You can use an 
 - [go-tun2socks](https://github.com/eycorsican/go-tun2socks)
 - [shadowsocks-libev](https://github.com/shadowsocks/shadowsocks-libev)
 - [shadowsocksr-libev](https://github.com/shadowsocksrr/shadowsocksr-libev)
-- [v2ray-core](https://github.com/v2ray/v2ray-core)
+- [Xray-core](https://github.com/XTLS/Xray-core)
 - [trojan](https://github.com/trojan-gfw/trojan)
 - [ACL4SSR](https://github.com/ACL4SSR/ACL4SSR)
 - [PAC](https://github.com/HMBSbige/Text_Translation/blob/master/ShadowsocksR/ss_white.pac)
@@ -68,5 +67,6 @@ As well, Netch avoid the restricted NAT problem caused by SSTap. You can use an 
 - [Privoxy](https://www.privoxy.org/)
 - [NatTypeTester](https://github.com/HMBSbige/NatTypeTester)
 - [NetFilter SDK](https://netfiltersdk.com/)
+- [pcap2socks](https://github.com/zhxie/pcap2socks)
 
 [![Stargazers over time](https://starchart.cc/NetchX/Netch.svg)](https://starchart.cc/NetchX/Netch)     

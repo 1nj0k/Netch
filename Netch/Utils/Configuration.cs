@@ -1,7 +1,9 @@
-﻿using System.IO;
+﻿using System;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Netch.Models;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 
 namespace Netch.Utils
 {
@@ -16,31 +18,22 @@ namespace Netch.Utils
         ///     设置
         /// </summary>
         public static readonly string SETTINGS_JSON = $"{DATA_DIR}\\settings.json";
+        private static readonly JsonSerializerOptions JsonSerializerOptions = Global.NewDefaultJsonSerializerOptions;
+
+        static Configuration()
+        {
+            JsonSerializerOptions.Converters.Add(new ServerConverterWithTypeDiscriminator());
+            JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+        }
 
         /// <summary>
         ///     加载配置
         /// </summary>
         public static void Load()
         {
-            if (Directory.Exists(DATA_DIR) && File.Exists(SETTINGS_JSON))
+            if (File.Exists(SETTINGS_JSON))
             {
-                try
-                {
-                    var settingJObject = (JObject) JsonConvert.DeserializeObject(File.ReadAllText(SETTINGS_JSON));
-                    Global.Settings = settingJObject?.ToObject<Setting>() ?? new Setting();
-                    Global.Settings.Server.Clear();
-
-                    if (settingJObject?["Server"] != null)
-                        foreach (JObject server in settingJObject["Server"])
-                        {
-                            var serverResult = ServerHelper.ParseJObject(server);
-                            if (serverResult != null)
-                                Global.Settings.Server.Add(serverResult);
-                        }
-                }
-                catch (JsonException)
-                {
-                }
+                Global.Settings = ParseSetting(File.ReadAllText(SETTINGS_JSON));
             }
             else
             {
@@ -52,25 +45,42 @@ namespace Netch.Utils
             }
         }
 
+        public static Setting ParseSetting(string text)
+        {
+            try
+            {
+                var settings = JsonSerializer.Deserialize<Setting>(text, JsonSerializerOptions)!;
+
+                #region Check Profile
+
+                settings.Profiles.RemoveAll(p => p.ServerRemark == string.Empty || p.ModeRemark == string.Empty);
+
+                if (settings.Profiles.Any(p => settings.Profiles.Any(p1 => p1 != p && p1.Index == p.Index)))
+                    for (var i = 0; i < settings.Profiles.Count; i++)
+                        settings.Profiles[i].Index = i;
+
+                #endregion
+
+                return settings;
+            }
+            catch (Exception e)
+            {
+                Logging.Error(e.ToString());
+                Utils.Open(Logging.LogFile);
+                Environment.Exit(-1);
+                return null!;
+            }
+        }
+
         /// <summary>
         ///     保存配置
         /// </summary>
         public static void Save()
         {
             if (!Directory.Exists(DATA_DIR))
-            {
                 Directory.CreateDirectory(DATA_DIR);
-            }
 
-            File.WriteAllText(SETTINGS_JSON,
-                JsonConvert.SerializeObject(
-                    Global.Settings,
-                    Formatting.Indented,
-                    new JsonSerializerSettings
-                    {
-                        NullValueHandling = NullValueHandling.Ignore
-                    }
-                ));
+            File.WriteAllBytes(SETTINGS_JSON, JsonSerializer.SerializeToUtf8Bytes(Global.Settings, JsonSerializerOptions));
         }
     }
 }

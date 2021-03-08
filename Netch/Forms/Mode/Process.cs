@@ -1,12 +1,11 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.WindowsAPICodePack.Dialogs;
 using Netch.Controllers;
+using Netch.Properties;
 using Netch.Utils;
 
 namespace Netch.Forms.Mode
@@ -16,7 +15,34 @@ namespace Netch.Forms.Mode
         /// <summary>
         ///     被编辑的模式
         /// </summary>
-        private readonly Models.Mode _mode;
+        private readonly Models.Mode? _mode;
+
+        /// <summary>
+        ///     编辑模式
+        /// </summary>
+        /// <param name="mode">模式</param>
+        public Process(Models.Mode? mode = null)
+        {
+            if (mode != null && mode.Type is not 0)
+                throw new ArgumentOutOfRangeException();
+
+            InitializeComponent();
+            Icon = Resources.icon;
+            CheckForIllegalCrossThreadCalls = false;
+
+            _mode = mode;
+            if (mode != null)
+            {
+                Text = "Edit Process Mode";
+
+                RemarkTextBox.TextChanged -= RemarkTextBox_TextChanged;
+                FilenameTextBox.Enabled = UseCustomFilenameBox.Enabled = false;
+
+                RemarkTextBox.Text = mode.Remark;
+                FilenameTextBox.Text = mode.RelativePath;
+                RuleListBox.Items.AddRange(mode.Rule.ToArray());
+            }
+        }
 
         /// <summary>
         ///     是否被编辑过
@@ -24,88 +50,20 @@ namespace Netch.Forms.Mode
         public bool Edited { get; private set; }
 
         /// <summary>
-        ///		编辑模式
-        /// </summary>
-        /// <param name="mode">模式</param>
-        public Process(Models.Mode mode)
-        {
-            if (mode.Type != 0)
-            {
-                throw new Exception("请传入进程模式");
-            }
-
-            InitializeComponent();
-            CheckForIllegalCrossThreadCalls = false;
-
-            Text = "Edit Process Mode";
-            _mode = mode;
-            RuleListBox.Items.AddRange(mode.Rule.ToArray());
-
-            #region 禁用文件名更改
-
-            RemarkTextBox.TextChanged -= RemarkTextBox_TextChanged;
-            FilenameTextBox.Enabled =
-                UseCustomFilenameBox.Enabled = false;
-
-            #endregion
-
-            FilenameTextBox.Text = mode.FileName;
-            RemarkTextBox.Text = mode.Remark;
-        }
-
-        public Process()
-        {
-            InitializeComponent();
-            CheckForIllegalCrossThreadCalls = false;
-
-            FilenameTextBox.Enabled = false;
-        }
-
-        /// <summary>
-        ///		扫描目录
+        ///     扫描目录
         /// </summary>
         /// <param name="DirName">路径</param>
         public void ScanDirectory(string DirName)
         {
             try
             {
-                var RDirInfo = new DirectoryInfo(DirName);
-                if (!RDirInfo.Exists)
-                {
-                    return;
-                }
+                RuleListBox.Items.AddRange(Directory.GetFiles(DirName, "*.exe", SearchOption.AllDirectories)
+                    .Select(f => Path.GetFileName(f))
+                    .ToArray());
             }
             catch (Exception)
             {
-                return;
-            }
-
-            var DirStack = new Stack<string>();
-            DirStack.Push(DirName);
-
-            while (DirStack.Count > 0)
-            {
-                var DirInfo = new DirectoryInfo(DirStack.Pop());
-                try
-                {
-                    foreach (var DirChildInfo in DirInfo.GetDirectories())
-                    {
-                        DirStack.Push(DirChildInfo.FullName);
-                    }
-
-                    foreach (var FileChildInfo in DirInfo.GetFiles())
-                    {
-                        if (FileChildInfo.Name.EndsWith(".exe") && !RuleListBox.Items.Contains(FileChildInfo.Name))
-                        {
-                            RuleListBox.Items.Add(FileChildInfo.Name);
-                            Edited = true;
-                        }
-                    }
-                }
-                catch (Exception)
-                {
-                    // ignored
-                }
+                // ignored
             }
         }
 
@@ -116,22 +74,23 @@ namespace Netch.Forms.Mode
         }
 
         /// <summary>
-        /// listBox右键菜单
+        ///     listBox右键菜单
         /// </summary>
         private void RuleListBox_MouseUp(object sender, MouseEventArgs e)
         {
             RuleListBox.SelectedIndex = RuleListBox.IndexFromPoint(e.X, e.Y);
             if (RuleListBox.SelectedIndex == -1)
                 return;
+
             if (e.Button == MouseButtons.Right)
-            {
                 contextMenuStrip.Show(RuleListBox, e.Location);
-            }
         }
 
-        void deleteRule_Click(object sender, EventArgs e)
+        private void deleteRule_Click(object sender, EventArgs e)
         {
-            if (RuleListBox.SelectedIndex == -1) return;
+            if (RuleListBox.SelectedIndex == -1)
+                return;
+
             RuleListBox.Items.RemoveAt(RuleListBox.SelectedIndex);
             Edited = true;
         }
@@ -155,9 +114,7 @@ namespace Netch.Forms.Mode
                 var process = ProcessNameTextBox.Text;
 
                 if (!RuleListBox.Items.Contains(process))
-                {
                     RuleListBox.Items.Add(process);
-                }
 
                 Edited = true;
                 RuleListBox.SelectedIndex = RuleListBox.Items.IndexOf(process);
@@ -176,7 +133,8 @@ namespace Netch.Forms.Mode
                 EnsurePathExists = true,
                 NavigateToShortcut = true
             };
-            if (dialog.ShowDialog(Win32Native.GetForegroundWindow()) == CommonFileDialogResult.Ok)
+
+            if (dialog.ShowDialog(Handle) == CommonFileDialogResult.Ok)
             {
                 ScanDirectory(dialog.FileName);
                 MessageBoxX.Show(i18N.Translate("Scan completed"));
@@ -209,30 +167,31 @@ namespace Netch.Forms.Mode
                 _mode.Rule.Clear();
                 _mode.Rule.AddRange(RuleListBox.Items.Cast<string>());
 
-                ModeHelper.WriteFile(_mode);
-                Global.MainForm.InitMode();
+                _mode.WriteFile();
+                Global.MainForm.LoadModes();
                 Edited = false;
                 MessageBoxX.Show(i18N.Translate("Mode updated successfully"));
             }
             else
             {
-                var fullName = ModeHelper.GetFullPath(FilenameTextBox.Text + ".txt");
+                var relativePath = $"Custom\\{FilenameTextBox.Text}.txt";
+                var fullName = ModeHelper.GetFullPath(relativePath);
                 if (File.Exists(fullName))
                 {
                     MessageBoxX.Show(i18N.Translate("File already exists.\n Please Change the filename"));
                     return;
                 }
 
-                var mode = new Models.Mode
+                var mode = new Models.Mode(fullName)
                 {
                     BypassChina = false,
-                    FileName = FilenameTextBox.Text,
                     Type = 0,
                     Remark = RemarkTextBox.Text
                 };
+
                 mode.Rule.AddRange(RuleListBox.Items.Cast<string>());
 
-                ModeHelper.WriteFile(mode);
+                mode.WriteFile();
                 ModeHelper.Add(mode);
                 MessageBoxX.Show(i18N.Translate("Mode added successfully"));
             }
@@ -246,21 +205,9 @@ namespace Netch.Forms.Mode
             {
                 if (!UseCustomFilenameBox.Checked)
                 {
-                    var invalidFileChars = Path.GetInvalidFileNameChars();
-                    var fileName = new StringBuilder(RemarkTextBox.Text);
-                    foreach (var c in invalidFileChars)
-                    {
-                        fileName.Replace(c, '_');
-                    }
-
-                    FilenameTextBox.Text = fileName.ToString();
+                    FilenameTextBox.Text = ModeEditorUtils.ToSafeFileName(RemarkTextBox.Text);
                 }
             });
-        }
-
-        private void UseCustomFilenameBox_CheckedChanged(object sender, EventArgs e)
-        {
-            FilenameTextBox.Enabled = UseCustomFilenameBox.Checked;
         }
     }
 }

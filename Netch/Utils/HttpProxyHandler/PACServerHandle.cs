@@ -1,124 +1,83 @@
 ﻿using System;
-using System.Collections;
-using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Text;
-using WindowsProxy;
+using System.Threading.Tasks;
+using Netch.Controllers;
 
 namespace Netch.Utils.HttpProxyHandler
 {
     /// <summary>
-    /// 提供PAC功能支持
+    ///     提供PAC功能支持
     /// </summary>
-    class PACServerHandle
+    internal static class PACServerHandle
     {
-        private static Hashtable httpWebServer = new Hashtable();
-        private static Hashtable pacList = new Hashtable();
+        private static HttpWebServer? _httpWebServer;
+        private static string? _pacContent;
+        public static readonly string PacPrefix= $"http://127.0.0.1:{Global.Settings.Pac_Port}/pac/";
 
-        public static void InitPACServer(string address)
+        public static string InitPACServer()
         {
             try
             {
-                if (!pacList.ContainsKey(address))
-                {
-                    pacList.Add(address, GetPacList(address));
-                }
+                _pacContent = GetPacList("127.0.0.1");
 
-                string prefixes = string.Format("http://{0}:{1}/pac/", address, Global.Settings.Pac_Port);
+                _httpWebServer = new HttpWebServer(SendResponse, PacPrefix);
+                Task.Run(() => _httpWebServer.StartWaitingRequest());
 
-                HttpWebServer ws = new HttpWebServer(SendResponse, prefixes);
-                ws.Run();
-
-                if (!httpWebServer.ContainsKey(address) && ws != null)
-                {
-                    httpWebServer.Add(address, ws);
-                }
-                Global.Settings.Pac_Url = GetPacUrl();
-
-                using var service = new ProxyService
-                {
-                    AutoConfigUrl = Global.Settings.Pac_Url
-                };
-                service.Pac();
-
-                Logging.Info(service.Set(service.Query()) + "");
-                Logging.Info($"Webserver InitServer OK: {Global.Settings.Pac_Url}");
+                var pacUrl = GetPacUrl();
+                Logging.Info($"Webserver InitServer OK: {pacUrl}");
+                return pacUrl;
             }
-            catch (Exception ex)
+            catch
             {
-                Logging.Error("Webserver InitServer " + ex.Message);
+                Logging.Error("Webserver InitServer Failed");
+                throw;
             }
         }
 
         public static string SendResponse(HttpListenerRequest request)
         {
-            try
-            {
-                string[] arrAddress = request.UserHostAddress.Split(':');
-                string address = "127.0.0.1";
-                if (arrAddress.Length > 0)
-                {
-                    address = arrAddress[0];
-                }
-                return pacList[address].ToString();
-            }
-            catch (Exception ex)
-            {
-                Logging.Error("Webserver SendResponse " + ex.Message);
-                return ex.Message;
-            }
+            return _pacContent!;
         }
 
         public static void Stop()
         {
             try
             {
-                if (httpWebServer == null)
-                {
-                    return;
-                }
-                foreach (var key in httpWebServer.Keys)
-                {
-                    Logging.Info("Webserver Stop " + key.ToString());
-                    ((HttpWebServer)httpWebServer[key]).Stop();
-                }
-                httpWebServer.Clear();
+                _httpWebServer?.Stop();
             }
-            catch (Exception ex)
+            catch
             {
-                Logging.Error("Webserver Stop " + ex.Message);
+                // ignored
             }
+
+            _httpWebServer = null;
         }
 
         private static string GetPacList(string address)
         {
             try
             {
-                List<string> lstProxy = new List<string>();
-                lstProxy.Add(string.Format("PROXY {0}:{1};", address, Global.Settings.HTTPLocalPort));
+                var proxy = $"PROXY {address}:{Global.Settings.HTTPLocalPort};";
+                var pacfile = Path.Combine(Global.NetchDir, "bin\\pac.txt");
 
-                var proxy = string.Join("", lstProxy.ToArray());
-                string strPacfile = Path.Combine(Global.NetchDir, $"bin\\pac.txt");
-
-                var pac = File.ReadAllText(strPacfile, Encoding.UTF8).Replace("__PROXY__", proxy);
+                var pac = File.ReadAllText(pacfile, Encoding.UTF8).Replace("__PROXY__", proxy);
                 return pac;
             }
             catch
-            { }
-            return "No pac content";
+            {
+                throw new MessageException("Pac file not found!");
+            }
         }
 
         /// <summary>
-        /// 获取PAC地址
+        ///     获取PAC地址
         /// </summary>
         /// <returns></returns>
         public static string GetPacUrl()
         {
-            string pacUrl = string.Format("http://127.0.0.1:{0}/pac/?t={1}", Global.Settings.Pac_Port,
-                          DateTime.Now.ToString("yyyyMMddHHmmssfff"));
-
-            return pacUrl;
+            return PacPrefix + $"?t={DateTime.Now:yyyyMMddHHmmssfff}";
         }
     }
 }

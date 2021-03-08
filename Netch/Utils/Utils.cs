@@ -12,7 +12,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using MaxMind.GeoIP2;
-using TaskScheduler;
+using Microsoft.Win32.TaskScheduler;
+using Task = System.Threading.Tasks.Task;
 
 namespace Netch.Utils
 {
@@ -20,6 +21,8 @@ namespace Netch.Utils
     {
         public static bool Open(string path)
         {
+            if (Global.Testing)
+                return true;
             try
             {
                 Process.Start(new ProcessStartInfo
@@ -28,6 +31,7 @@ namespace Netch.Utils
                     Arguments = path,
                     UseShellExecute = true
                 });
+
                 return true;
             }
             catch
@@ -56,14 +60,12 @@ namespace Netch.Utils
             return timeout;
         }
 
-        public static async Task<int> ICMPing(IPAddress ip, int timeout = 1000)
+        public static int ICMPing(IPAddress ip, int timeout = 1000)
         {
             var reply = new Ping().Send(ip, timeout);
 
             if (reply?.Status == IPStatus.Success)
-            {
                 return Convert.ToInt32(reply.RoundtripTime);
-            }
 
             return timeout;
         }
@@ -71,39 +73,33 @@ namespace Netch.Utils
         public static string GetCityCode(string Hostname)
         {
             if (Hostname.Contains(":"))
-            {
                 Hostname = Hostname.Split(':')[0];
-            }
 
-            string Country;
+            string? country = null;
             try
             {
                 var databaseReader = new DatabaseReader("bin\\GeoLite2-Country.mmdb");
 
                 if (IPAddress.TryParse(Hostname, out _))
                 {
-                    Country = databaseReader.Country(Hostname).Country.IsoCode;
+                    country = databaseReader.Country(Hostname).Country.IsoCode;
                 }
                 else
                 {
-                    var DnsResult = DNS.Lookup(Hostname);
+                    var dnsResult = DnsUtils.Lookup(Hostname);
 
-                    if (DnsResult != null)
-                    {
-                        Country = databaseReader.Country(DnsResult).Country.IsoCode;
-                    }
-                    else
-                    {
-                        Country = "Unknown";
-                    }
+                    if (dnsResult != null)
+                        country = databaseReader.Country(dnsResult).Country.IsoCode;
                 }
             }
-            catch (Exception)
+            catch
             {
-                Country = "Unknown";
+                // ignored
             }
 
-            return Country == null ? "Unknown" : Country;
+            country ??= "Unknown";
+
+            return country;
         }
 
         public static string SHA256CheckSum(string filePath)
@@ -138,56 +134,11 @@ namespace Netch.Utils
             }
         }
 
-        public static string GetFileVersion(string file) => File.Exists(file) ? FileVersionInfo.GetVersionInfo(file).FileVersion : string.Empty;
-
-        public static bool SearchOutboundAdapter(bool logging = true)
+        public static string GetFileVersion(string file)
         {
-            // 寻找出口适配器
-            if (Win32Native.GetBestRoute(BitConverter.ToUInt32(IPAddress.Parse("114.114.114.114").GetAddressBytes(), 0),
-                0, out var pRoute) != 0)
-            {
-                Logging.Error("GetBestRoute 搜索失败");
-                return false;
-            }
-
-            Global.Outbound.Index = pRoute.dwForwardIfIndex;
-            // 根据 IP Index 寻找 出口适配器
-            try
-            {
-                var adapter = NetworkInterface.GetAllNetworkInterfaces().First(_ =>
-                {
-                    try
-                    {
-                        return _.GetIPProperties().GetIPv4Properties().Index == Global.Outbound.Index;
-                    }
-                    catch
-                    {
-                        return false;
-                    }
-                });
-                Global.Outbound.Adapter = adapter;
-                Global.Outbound.Gateway = new IPAddress(pRoute.dwForwardNextHop);
-                if (logging)
-                {
-                    Logging.Info($"出口 IPv4 地址：{Global.Outbound.Address}");
-                    Logging.Info($"出口 网关 地址：{Global.Outbound.Gateway}");
-                    Logging.Info($"出口适配器：{adapter.Name} {adapter.Id} {adapter.Description}, index: {Global.Outbound.Index}");
-                }
-
-                return true;
-            }
-            catch (Exception e)
-            {
-                Logging.Error($"找不到出口IP所在网卡: {e}");
-                return false;
-            }
+            return File.Exists(file) ? FileVersionInfo.GetVersionInfo(file).FileVersion : string.Empty;
         }
 
-        public static void LoggingAdapters(string id)
-        {
-            var adapter = NetworkInterface.GetAllNetworkInterfaces().First(adapter => adapter.Id == id);
-            Logging.Warning($"检索此网卡信息出错: {adapter.Name} {adapter.Id} {adapter.Description}");
-        }
 
         public static void DrawCenterComboBox(object sender, DrawItemEventArgs e)
         {
@@ -195,19 +146,15 @@ namespace Netch.Utils
             {
                 e.DrawBackground();
 
-                if (e.Index >= 0)
-                {
-                    var brush = new SolidBrush(cbx.ForeColor);
+                if (e.Index < 0)
+                    return;
 
-                    if ((e.State & DrawItemState.Selected) == DrawItemState.Selected)
-                        brush = SystemBrushes.HighlightText as SolidBrush;
-
-                    e.Graphics.DrawString(cbx.Items[e.Index].ToString(), cbx.Font, brush, e.Bounds, new StringFormat
-                    {
-                        LineAlignment = StringAlignment.Center,
-                        Alignment = StringAlignment.Center
-                    });
-                }
+                TextRenderer.DrawText(e.Graphics,
+                    cbx.Items[e.Index].ToString(),
+                    cbx.Font,
+                    e.Bounds,
+                    (e.State & DrawItemState.Selected) == DrawItemState.Selected ? SystemColors.HighlightText : cbx.ForeColor,
+                    TextFormatFlags.HorizontalCenter);
             }
         }
 
@@ -219,39 +166,29 @@ namespace Netch.Utils
                 case ListView listView:
                     // ListView sub item
                     foreach (var item in listView.Columns.Cast<ColumnHeader>())
-                    {
                         ComponentIterator(item, func);
-                    }
 
                     break;
                 case ToolStripMenuItem toolStripMenuItem:
                     // Iterator Menu strip sub item
                     foreach (var item in toolStripMenuItem.DropDownItems.Cast<ToolStripItem>())
-                    {
                         ComponentIterator(item, func);
-                    }
 
                     break;
                 case MenuStrip menuStrip:
                     // Menu Strip
                     foreach (var item in menuStrip.Items.Cast<ToolStripItem>())
-                    {
                         ComponentIterator(item, func);
-                    }
 
                     break;
                 case ContextMenuStrip contextMenuStrip:
                     foreach (var item in contextMenuStrip.Items.Cast<ToolStripItem>())
-                    {
                         ComponentIterator(item, func);
-                    }
 
                     break;
                 case Control control:
                     foreach (var c in control.Controls.Cast<Control>())
-                    {
                         ComponentIterator(c, func);
-                    }
 
                     if (control.ContextMenuStrip != null)
                         ComponentIterator(control.ContextMenuStrip, func);
@@ -262,47 +199,35 @@ namespace Netch.Utils
 
         public static void RegisterNetchStartupItem()
         {
-            var scheduler = new TaskSchedulerClass();
-            scheduler.Connect();
-            var folder = scheduler.GetFolder("\\");
-
-            var taskIsExists = false;
-            try
-            {
-                folder.GetTask("Netch Startup");
-                taskIsExists = true;
-            }
-            catch
-            {
-                // ignored
-            }
+            const string TaskName = "Netch Startup";
+            var folder = TaskService.Instance.GetFolder("\\");
+            var taskIsExists = folder.Tasks.Any(task => task.Name == TaskName);
 
             if (Global.Settings.RunAtStartup)
             {
                 if (taskIsExists)
-                    folder.DeleteTask("Netch Startup", 0);
+                    folder.DeleteTask(TaskName, false);
 
-                var task = scheduler.NewTask(0);
-                task.RegistrationInfo.Author = "Netch";
-                task.RegistrationInfo.Description = "Netch run at startup.";
-                task.Principal.RunLevel = _TASK_RUNLEVEL.TASK_RUNLEVEL_HIGHEST;
+                var td = TaskService.Instance.NewTask();
 
-                task.Triggers.Create(_TASK_TRIGGER_TYPE2.TASK_TRIGGER_LOGON);
-                var action = (IExecAction) task.Actions.Create(_TASK_ACTION_TYPE.TASK_ACTION_EXEC);
-                action.Path = Application.ExecutablePath;
+                td.RegistrationInfo.Author = "Netch";
+                td.RegistrationInfo.Description = "Netch run at startup.";
+                td.Principal.RunLevel = TaskRunLevel.Highest;
 
+                td.Triggers.Add(new LogonTrigger());
+                td.Actions.Add(new ExecAction(Global.NetchExecutable));
 
-                task.Settings.ExecutionTimeLimit = "PT0S";
-                task.Settings.DisallowStartIfOnBatteries = false;
-                task.Settings.RunOnlyIfIdle = false;
+                td.Settings.ExecutionTimeLimit = TimeSpan.Zero;
+                td.Settings.DisallowStartIfOnBatteries = false;
+                td.Settings.RunOnlyIfIdle = false;
+                td.Settings.Compatibility = TaskCompatibility.V2_1;
 
-                folder.RegisterTaskDefinition("Netch Startup", task, (int) _TASK_CREATION.TASK_CREATE, null, null,
-                    _TASK_LOGON_TYPE.TASK_LOGON_INTERACTIVE_TOKEN, "");
+                TaskService.Instance.RootFolder.RegisterTaskDefinition("Netch Startup", td);
             }
             else
             {
                 if (taskIsExists)
-                    folder.DeleteTask("Netch Startup", 0);
+                    folder.DeleteTask(TaskName, false);
             }
         }
 
@@ -312,7 +237,9 @@ namespace Netch.Utils
             {
                 case TextBox _:
                 case ComboBox _:
-                    if (((Control) component).ForeColor != color) ((Control) component).ForeColor = color;
+                    if (((Control) component).ForeColor != color)
+                        ((Control) component).ForeColor = color;
+
                     break;
             }
         }

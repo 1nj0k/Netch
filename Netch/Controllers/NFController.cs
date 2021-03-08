@@ -15,13 +15,10 @@ namespace Netch.Controllers
 {
     public class NFController : IModeController
     {
-        private static readonly ServiceController NFService = new ServiceController("netfilter2");
+        private static readonly ServiceController NFService = new("netfilter2");
 
-        private static readonly string BinDriver = string.Empty;
+        private static readonly string BinDriver;
         private static readonly string SystemDriver = $"{Environment.SystemDirectory}\\drivers\\netfilter2.sys";
-        private static string _sysDns;
-
-        public string Name { get; } = "Redirector";
 
         static NFController()
         {
@@ -40,73 +37,52 @@ namespace Netch.Controllers
                     fileName = "Win-7.sys";
                     break;
                 default:
-                    Logging.Error($"不支持的系统版本：{Environment.OSVersion.Version}");
-                    return;
+                    throw new MessageException($"不支持的系统版本：{Environment.OSVersion.Version}");
             }
 
             BinDriver = "bin\\" + fileName;
         }
 
-        public bool Start(in Mode mode)
+        public string Name { get; } = "Redirector";
+
+        public void Start(in Mode mode)
         {
-            if (!CheckDriver())
-                return false;
+            CheckDriver();
 
             #region aio_dial
 
-            aio_dial((int) NameList.TYPE_FILTERLOOPBACK, "false");
-            aio_dial((int) NameList.TYPE_TCPLISN, Global.Settings.RedirectorTCPPort.ToString());
+            aio_dial((int)NameList.TYPE_FILTERLOOPBACK, "false");
+            aio_dial((int)NameList.TYPE_TCPLISN, Global.Settings.RedirectorTCPPort.ToString());
 
-            if (Global.Settings.ProcessNoProxyForUdp && Global.Settings.ProcessNoProxyForTcp) MessageBoxX.Show("？");
-
-            //UDP
-            if (Global.Settings.ProcessNoProxyForUdp)
-            {
-                aio_dial((int) NameList.TYPE_FILTERUDP, "false");
-                SetServer(PortType.TCP);
-            }
-            else
-            {
-                aio_dial((int) NameList.TYPE_FILTERUDP, "true");
-                SetServer(PortType.Both);
-            }
-
-            //TCP
-            if (Global.Settings.ProcessNoProxyForTcp)
-            {
-                aio_dial((int) NameList.TYPE_FILTERTCP, "false");
-                SetServer(PortType.UDP);
-            }
-            else
-            {
-                aio_dial((int) NameList.TYPE_FILTERTCP, "true");
-                SetServer(PortType.Both);
-            }
+            aio_dial((int)NameList.TYPE_FILTERUDP, (Global.Settings.ProcessProxyProtocol != PortType.TCP).ToString().ToLower());
+            aio_dial((int)NameList.TYPE_FILTERTCP, (Global.Settings.ProcessProxyProtocol != PortType.UDP).ToString().ToLower());
+            SetServer(Global.Settings.ProcessProxyProtocol);
 
             if (!CheckRule(mode.FullRule, out var list))
-            {
-                MessageBoxX.Show($"\"{string.Join("", list.Select(s => s + "\n"))}\" does not conform to C++ regular expression syntax");
-                return false;
-            }
+                throw new MessageException($"\"{string.Join("", list.Select(s => s + "\n"))}\" does not conform to C++ regular expression syntax");
 
             SetName(mode);
 
             #endregion
 
-            if (Global.Settings.ModifySystemDNS)
-            {
-                // 备份并替换系统 DNS
-                _sysDns = DNS.OutboundDNS;
-                if (string.IsNullOrWhiteSpace(Global.Settings.ModifiedDNS))
-                    Global.Settings.ModifiedDNS = "1.1.1.1,8.8.8.8";
-                DNS.OutboundDNS = Global.Settings.ModifiedDNS;
-            }
+            if (Global.Settings.RedirectDNS)
+                aio_dial((int)NameList.TYPE_REDIRCTOR_DNS, Global.Settings.RedirectDNSAddr.ToString());
 
-            return aio_init();
+            if (Global.Settings.RedirectICMP)
+                aio_dial((int)NameList.TYPE_REDIRCTOR_ICMP, Global.Settings.RedirectICMPAddr.ToString());
+
+            aio_dial((int)NameList.TYPE_FILTERCHILDPROC, Global.Settings.ChildProcessHandle.ToString());
+
+            if (!aio_init())
+                throw new MessageException("Redirector Start failed, run Netch with \"-console\" argument");
+        }
+
+        public void Stop()
+        {
+            aio_free();
         }
 
         /// <summary>
-        /// 
         /// </summary>
         /// <param name="rules"></param>
         /// <param name="incompatibleRule"></param>
@@ -114,12 +90,11 @@ namespace Netch.Controllers
         public static bool CheckRule(IEnumerable<string> rules, out IEnumerable<string> incompatibleRule)
         {
             incompatibleRule = rules.Where(r => !CheckCppRegex(r, false));
-            aio_dial((int) NameList.TYPE_CLRNAME, "");
+            aio_dial((int)NameList.TYPE_CLRNAME, "");
             return !incompatibleRule.Any();
         }
 
         /// <summary>
-        /// 
         /// </summary>
         /// <param name="r"></param>
         /// <param name="clear"></param>
@@ -129,17 +104,18 @@ namespace Netch.Controllers
             try
             {
                 if (r.StartsWith("!"))
-                    return aio_dial((int) NameList.TYPE_ADDNAME, r.Substring(1));
-                return aio_dial((int) NameList.TYPE_ADDNAME, r);
+                    return aio_dial((int)NameList.TYPE_ADDNAME, r.Substring(1));
+
+                return aio_dial((int)NameList.TYPE_ADDNAME, r);
             }
             finally
             {
                 if (clear)
-                    aio_dial((int) NameList.TYPE_CLRNAME, "");
+                    aio_dial((int)NameList.TYPE_CLRNAME, "");
             }
         }
 
-        private static bool CheckDriver()
+        private static void CheckDriver()
         {
             var binFileVersion = Utils.Utils.GetFileVersion(BinDriver);
             var systemFileVersion = Utils.Utils.GetFileVersion(SystemDriver);
@@ -147,56 +123,34 @@ namespace Netch.Controllers
             Logging.Info("内置驱动版本: " + binFileVersion);
             Logging.Info("系统驱动版本: " + systemFileVersion);
 
-            if (!File.Exists(BinDriver))
-            {
-                Logging.Warning("内置驱动不存在");
-                if (File.Exists(SystemDriver))
-                {
-                    Logging.Warning("使用系统驱动");
-                    return true;
-                }
-
-                Logging.Error("未安装驱动");
-                return false;
-            }
-
             if (!File.Exists(SystemDriver))
             {
-                return InstallDriver();
+                InstallDriver();
+                return;
             }
 
-            var updateFlag = false;
-
+            var reinstallFlag = false;
             if (Version.TryParse(binFileVersion, out var binResult) && Version.TryParse(systemFileVersion, out var systemResult))
             {
                 if (binResult.CompareTo(systemResult) > 0)
-                {
                     // Bin greater than Installed
-                    updateFlag = true;
-                }
-                else
-                {
-                    // Installed greater than Bin
-                    if (systemResult.Major != binResult.Major)
-                    {
-                        // API breaking changes
-                        updateFlag = true;
-                    }
-                }
+                    reinstallFlag = true;
+                else if (systemResult.Major != binResult.Major)
+                    // Installed greater than Bin but Major Version Difference (has breaking changes), do downgrade
+                    reinstallFlag = true;
             }
             else
             {
                 if (!systemFileVersion.Equals(binFileVersion))
-                {
-                    updateFlag = true;
-                }
+                    reinstallFlag = true;
             }
 
-            if (!updateFlag) return true;
+            if (!reinstallFlag)
+                return;
 
             Logging.Info("更新驱动");
             UninstallDriver();
-            return InstallDriver();
+            InstallDriver();
         }
 
         private void SetServer(in PortType portType)
@@ -215,73 +169,62 @@ namespace Netch.Controllers
             if (portType == PortType.UDP)
             {
                 offset = UdpNameListOffset;
-                server = MainController.UdpServer;
-                controller = MainController.UdpServerController;
+                server = MainController.UdpServer!;
+                controller = MainController.UdpServerController!;
             }
             else
             {
                 offset = 0;
-                server = MainController.Server;
-                controller = MainController.ServerController;
+                server = MainController.Server!;
+                controller = MainController.ServerController!;
             }
 
             if (server is Socks5 socks5)
             {
-                aio_dial((int) NameList.TYPE_TCPTYPE + offset, "Socks5");
-                aio_dial((int) NameList.TYPE_TCPHOST + offset, $"{socks5.AutoResolveHostname()}:{socks5.Port}");
-                aio_dial((int) NameList.TYPE_TCPUSER + offset, socks5.Username ?? string.Empty);
-                aio_dial((int) NameList.TYPE_TCPPASS + offset, socks5.Password ?? string.Empty);
-                aio_dial((int) NameList.TYPE_TCPMETH + offset, string.Empty);
+                aio_dial((int)NameList.TYPE_TCPTYPE + offset, "Socks5");
+                aio_dial((int)NameList.TYPE_TCPHOST + offset, $"{socks5.AutoResolveHostname()}:{socks5.Port}");
+                aio_dial((int)NameList.TYPE_TCPUSER + offset, socks5.Username ?? string.Empty);
+                aio_dial((int)NameList.TYPE_TCPPASS + offset, socks5.Password ?? string.Empty);
+                aio_dial((int)NameList.TYPE_TCPMETH + offset, string.Empty);
             }
             else if (server is Shadowsocks shadowsocks && !shadowsocks.HasPlugin() && Global.Settings.RedirectorSS)
             {
-                aio_dial((int) NameList.TYPE_TCPTYPE + offset, "Shadowsocks");
-                aio_dial((int) NameList.TYPE_TCPHOST + offset, $"{shadowsocks.AutoResolveHostname()}:{shadowsocks.Port}");
-                aio_dial((int) NameList.TYPE_TCPMETH + offset, shadowsocks.EncryptMethod ?? string.Empty);
-                aio_dial((int) NameList.TYPE_TCPPASS + offset, shadowsocks.Password ?? string.Empty);
+                aio_dial((int)NameList.TYPE_TCPTYPE + offset, "Shadowsocks");
+                aio_dial((int)NameList.TYPE_TCPHOST + offset, $"{shadowsocks.AutoResolveHostname()}:{shadowsocks.Port}");
+                aio_dial((int)NameList.TYPE_TCPMETH + offset, shadowsocks.EncryptMethod ?? string.Empty);
+                aio_dial((int)NameList.TYPE_TCPPASS + offset, shadowsocks.Password ?? string.Empty);
             }
             else
             {
-                aio_dial((int) NameList.TYPE_TCPTYPE + offset, "Socks5");
-                aio_dial((int) NameList.TYPE_TCPHOST + offset, $"127.0.0.1:{controller.Socks5LocalPort()}");
-                aio_dial((int) NameList.TYPE_TCPUSER + offset, string.Empty);
-                aio_dial((int) NameList.TYPE_TCPPASS + offset, string.Empty);
-                aio_dial((int) NameList.TYPE_TCPMETH + offset, string.Empty);
+                aio_dial((int)NameList.TYPE_TCPTYPE + offset, "Socks5");
+                aio_dial((int)NameList.TYPE_TCPHOST + offset, $"127.0.0.1:{controller.Socks5LocalPort()}");
+                aio_dial((int)NameList.TYPE_TCPUSER + offset, string.Empty);
+                aio_dial((int)NameList.TYPE_TCPPASS + offset, string.Empty);
+                aio_dial((int)NameList.TYPE_TCPMETH + offset, string.Empty);
             }
         }
 
         private void SetName(Mode mode)
         {
-            aio_dial((int) NameList.TYPE_CLRNAME, "");
+            aio_dial((int)NameList.TYPE_CLRNAME, "");
             foreach (var rule in mode.FullRule)
             {
                 if (rule.StartsWith("!"))
                 {
-                    aio_dial((int) NameList.TYPE_BYPNAME, rule.Substring(1));
+                    aio_dial((int)NameList.TYPE_BYPNAME, rule.Substring(1));
                     continue;
                 }
 
-                aio_dial((int) NameList.TYPE_ADDNAME, rule);
+                aio_dial((int)NameList.TYPE_ADDNAME, rule);
             }
 
-            aio_dial((int) NameList.TYPE_ADDNAME, @"NTT\.exe");
-        }
-
-        public void Stop()
-        {
-            Task.Run(() =>
-            {
-                if (Global.Settings.ModifySystemDNS)
-                    //恢复系统DNS
-                    DNS.OutboundDNS = _sysDns;
-            });
-
-            aio_free();
+            aio_dial((int)NameList.TYPE_ADDNAME, @"NTT\.exe");
+            aio_dial((int)NameList.TYPE_BYPNAME, "^" + Global.NetchDir.ToRegexString() + @"((?!NTT\.exe).)*$");
         }
 
         #region NativeMethods
 
-        private const int UdpNameListOffset = (int) NameList.TYPE_UDPTYPE - (int) NameList.TYPE_TCPTYPE;
+        private const int UdpNameListOffset = (int)NameList.TYPE_UDPTYPE - (int)NameList.TYPE_TCPTYPE;
 
         [DllImport("Redirector.bin", CallingConvention = CallingConvention.Cdecl)]
         private static extern bool aio_dial(int name, [MarshalAs(UnmanagedType.LPWStr)] string value);
@@ -298,26 +241,39 @@ namespace Netch.Controllers
         [DllImport("Redirector.bin", CallingConvention = CallingConvention.Cdecl)]
         private static extern ulong aio_getDL();
 
-
-        public enum NameList : int
+        public enum NameList
         {
+            //bool
             TYPE_FILTERLOOPBACK,
             TYPE_FILTERTCP,
             TYPE_FILTERUDP,
+            TYPE_FILTERIP,
+            TYPE_FILTERCHILDPROC,//子进程捕获
+
             TYPE_TCPLISN,
             TYPE_TCPTYPE,
             TYPE_TCPHOST,
             TYPE_TCPUSER,
             TYPE_TCPPASS,
             TYPE_TCPMETH,
+
             TYPE_UDPTYPE,
             TYPE_UDPHOST,
             TYPE_UDPUSER,
             TYPE_UDPPASS,
             TYPE_UDPMETH,
+
             TYPE_ADDNAME,
+            TYPE_ADDFIP,
+
             TYPE_BYPNAME,
-            TYPE_CLRNAME
+
+            TYPE_CLRNAME,
+            TYPE_CLRFIP,
+
+            //str addr x.x.x.x only ipv4
+            TYPE_REDIRCTOR_DNS,
+            TYPE_REDIRCTOR_ICMP
         }
 
         #endregion
@@ -328,9 +284,13 @@ namespace Netch.Controllers
         ///     安装 NF 驱动
         /// </summary>
         /// <returns>驱动是否安装成功</returns>
-        public static bool InstallDriver()
+        public static void InstallDriver()
         {
             Logging.Info("安装 NF 驱动");
+
+            if (!File.Exists(BinDriver))
+                throw new MessageException(i18N.Translate("builtin driver files missing, can't install NF driver"));
+
             try
             {
                 File.Copy(BinDriver, SystemDriver);
@@ -338,7 +298,7 @@ namespace Netch.Controllers
             catch (Exception e)
             {
                 Logging.Error("驱动复制失败\n" + e);
-                return false;
+                throw new MessageException($"Copy NF driver file failed\n{e.Message}");
             }
 
             Global.MainForm.StatusText(i18N.Translate("Register driver"));
@@ -351,10 +311,8 @@ namespace Netch.Controllers
             else
             {
                 Logging.Error($"注册驱动失败，返回值：{result}");
-                return false;
+                throw new MessageException($"Register NF driver failed\n{result}");
             }
-
-            return true;
         }
 
         /// <summary>
@@ -377,7 +335,9 @@ namespace Netch.Controllers
                 // ignored
             }
 
-            if (!File.Exists(SystemDriver)) return true;
+            if (!File.Exists(SystemDriver))
+                return true;
+
             NFAPI.nf_unRegisterDriver("netfilter2");
             File.Delete(SystemDriver);
 
