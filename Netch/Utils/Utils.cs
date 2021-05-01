@@ -21,8 +21,6 @@ namespace Netch.Utils
     {
         public static bool Open(string path)
         {
-            if (Global.Testing)
-                return true;
             try
             {
                 Process.Start(new ProcessStartInfo
@@ -107,8 +105,8 @@ namespace Netch.Utils
             try
             {
                 var sha256 = SHA256.Create();
-                var fileStream = File.OpenRead(filePath);
-                return sha256.ComputeHash(fileStream).Aggregate(string.Empty, (current, b) => current + b.ToString("x2"));
+                using var fileStream = File.OpenRead(filePath);
+                return string.Concat(sha256.ComputeHash(fileStream).Select(b => b.ToString("x2")));
             }
             catch
             {
@@ -116,29 +114,13 @@ namespace Netch.Utils
             }
         }
 
-        public static void KillProcessByName(string name)
-        {
-            try
-            {
-                foreach (var p in Process.GetProcessesByName(name))
-                    if (p.MainModule != null && p.MainModule.FileName.StartsWith(Global.NetchDir))
-                        p.Kill();
-            }
-            catch (Win32Exception e)
-            {
-                Logging.Error($"结束进程 {name} 错误：" + e.Message);
-            }
-            catch (Exception)
-            {
-                // ignored
-            }
-        }
-
         public static string GetFileVersion(string file)
         {
-            return File.Exists(file) ? FileVersionInfo.GetVersionInfo(file).FileVersion : string.Empty;
-        }
+            if (File.Exists(file))
+                return FileVersionInfo.GetVersionInfo(file).FileVersion ?? "";
 
+            return "";
+        }
 
         public static void DrawCenterComboBox(object sender, DrawItemEventArgs e)
         {
@@ -237,11 +219,61 @@ namespace Netch.Utils
             {
                 case TextBox _:
                 case ComboBox _:
-                    if (((Control) component).ForeColor != color)
-                        ((Control) component).ForeColor = color;
+                    if (((Control)component).ForeColor != color)
+                        ((Control)component).ForeColor = color;
 
                     break;
             }
+        }
+
+        public static async Task ProcessRunHiddenAsync(string fileName, string arguments = "", bool print = true)
+        {
+            var p = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = fileName,
+                    Arguments = arguments,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    Verb = "runas",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            };
+
+            Global.Logger.Debug($"{fileName} {arguments}");
+
+            p.Start();
+            var output = await p.StandardOutput.ReadToEndAsync();
+            var error = await p.StandardError.ReadToEndAsync();
+            if (print)
+            {
+                Console.Write(output);
+                Console.Write(error);
+            }
+
+            await p.WaitForExitAsync();
+        }
+
+        public static int SubnetToCidr(string value)
+        {
+            var subnet = IPAddress.Parse(value);
+            return SubnetToCidr(subnet);
+        }
+
+        public static int SubnetToCidr(IPAddress subnet)
+        {
+            return subnet.GetAddressBytes().Sum(b => Convert.ToString(b, 2).Count(c => c == '1'));
+        }
+
+        public static string HostAppendPort(string host, ushort port = 53)
+        {
+            if (!host.Contains(':'))
+                host += $":{port}";
+
+            return host;
         }
     }
 }

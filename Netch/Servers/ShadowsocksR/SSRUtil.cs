@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
-using Netch.Controllers;
+using Netch.Interfaces;
 using Netch.Models;
 using Netch.Servers.Shadowsocks;
 using Netch.Servers.ShadowsocksR.Form;
@@ -19,13 +19,13 @@ namespace Netch.Servers.ShadowsocksR
 
         public string ShortName { get; } = "SR";
 
-        public string[] UriScheme { get; } = {"ssr"};
+        public string[] UriScheme { get; } = { "ssr" };
 
         public Type ServerType { get; } = typeof(ShadowsocksR);
 
         public void Edit(Server s)
         {
-            new ShadowsocksRForm((ShadowsocksR) s).ShowDialog();
+            new ShadowsocksRForm((ShadowsocksR)s).ShowDialog();
         }
 
         public void Create()
@@ -35,12 +35,12 @@ namespace Netch.Servers.ShadowsocksR
 
         public string GetShareLink(Server s)
         {
-            var server = (ShadowsocksR) s;
+            var server = (ShadowsocksR)s;
 
             // https://github.com/shadowsocksr-backup/shadowsocks-rss/wiki/SSR-QRcode-scheme
             // ssr://base64(host:port:protocol:method:obfs:base64pass/?obfsparam=base64param&protoparam=base64param&remarks=base64remarks&group=base64group&udpport=0&uot=0)
             var paraStr =
-                $"/?obfsparam={ShareLink.URLSafeBase64Encode(server.OBFSParam)}&protoparam={ShareLink.URLSafeBase64Encode(server.ProtocolParam)}&remarks={ShareLink.URLSafeBase64Encode(server.Remark)}";
+                $"/?obfsparam={ShareLink.URLSafeBase64Encode(server.OBFSParam ?? "")}&protoparam={ShareLink.URLSafeBase64Encode(server.ProtocolParam ?? "")}&remarks={ShareLink.URLSafeBase64Encode(server.Remark)}";
 
             return "ssr://" +
                    ShareLink.URLSafeBase64Encode(
@@ -143,22 +143,22 @@ namespace Netch.Servers.ShadowsocksR
 
         public bool CheckServer(Server s)
         {
-            var server = (ShadowsocksR) s;
+            var server = (ShadowsocksR)s;
             if (!SSRGlobal.EncryptMethods.Contains(server.EncryptMethod))
             {
-                Logging.Error($"不支持的 SSR 加密方式：{server.EncryptMethod}");
+                Global.Logger.Error($"不支持的 SSR 加密方式：{server.EncryptMethod}");
                 return false;
             }
 
             if (!SSRGlobal.Protocols.Contains(server.Protocol))
             {
-                Logging.Error($"不支持的 SSR 协议：{server.Protocol}");
+                Global.Logger.Error($"不支持的 SSR 协议：{server.Protocol}");
                 return false;
             }
 
             if (!SSRGlobal.OBFSs.Contains(server.OBFS))
             {
-                Logging.Error($"不支持的 SSR 混淆：{server.OBFS}");
+                Global.Logger.Error($"不支持的 SSR 混淆：{server.OBFS}");
                 return false;
             }
 

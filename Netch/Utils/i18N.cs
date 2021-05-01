@@ -1,4 +1,5 @@
-﻿using System.Collections;
+﻿using Netch.Properties;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -6,7 +7,6 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
-using Netch.Properties;
 
 namespace Netch.Utils
 {
@@ -41,7 +41,7 @@ namespace Netch.Utils
             {
                 var oldLangCode = LangCode;
                 LangCode = languages.FirstOrDefault(s => GetLanguage(s).Equals(GetLanguage(LangCode))) ?? "en-US";
-                Logging.Info($"找不到语言 {oldLangCode}, 使用 {LangCode}");
+                Global.Logger.Info($"找不到语言 {oldLangCode}, 使用 {LangCode}");
             }
 
             switch (LangCode)
@@ -61,7 +61,7 @@ namespace Netch.Utils
 
             if (!dictionary.Any())
             {
-                Logging.Error($"{LangCode} 语言文件错误");
+                Global.Logger.Error($"{LangCode} 语言文件错误");
                 return;
             }
 
@@ -88,7 +88,7 @@ namespace Netch.Utils
             var a = new StringBuilder();
             foreach (var t in text)
                 if (t is string)
-                    a.Append(Data.Contains(t) ? Data[t].ToString() : t);
+                    a.Append(Data[t]?.ToString() ?? t);
                 else
                     a.Append(t);
 
@@ -99,14 +99,14 @@ namespace Netch.Utils
         {
             for (var i = 0; i < args.Length; i++)
                 if (args[i] is string)
-                    args[i] = Translate((string) args[i]);
+                    args[i] = Translate((string)args[i]);
 
             return string.Format(Translate(format), args);
         }
 
         public static List<string> GetTranslateList()
         {
-            var translateFile = new List<string> {"System", "zh-CN", "en-US"};
+            var translateFile = new List<string> { "System", "zh-CN", "en-US" };
 
             if (!Directory.Exists("i18n"))
                 return translateFile;

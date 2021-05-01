@@ -1,25 +1,47 @@
-﻿using System;
+﻿using Netch.Utils;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using Netch.Utils;
 
 namespace Netch.Models
 {
     public class Mode
     {
-        public readonly string? FullName;
+        private readonly Lazy<List<string>> _lazyRule;
+
+        public string? FullName { get; private set; }
+
+        public Mode(string? fullName)
+        {
+            _lazyRule = new Lazy<List<string>>(ReadRules);
+            if (fullName == null)
+                return;
+
+            FullName = fullName;
+            if (!File.Exists(FullName))
+                return;
+
+            var text = File.ReadLines(FullName).First();
+
+            // load head
+            if (text.First() != '#')
+                throw new Exception($"mode {FullName} head not found at Line 0");
+
+            var split = text.Substring(1).SplitTrimEntries(',');
+            Remark = split[0];
+
+            var typeResult = int.TryParse(split.ElementAtOrDefault(1), out var type);
+            Type = typeResult ? type : 0;
+            if (!ModeHelper.ModeTypes.Contains(Type))
+                throw new NotSupportedException($"not support mode \"[{Type}]{Remark}\".");
+        }
 
         /// <summary>
         ///     规则
         /// </summary>
-        public readonly List<string> Rule = new();
-
-        /// <summary>
-        ///     绕过中国（0. 不绕过 1. 绕过）
-        /// </summary>
-        public bool BypassChina { get; set; }
+        public List<string> Rule => _lazyRule.Value;
 
         /// <summary>
         ///     备注
@@ -43,15 +65,6 @@ namespace Netch.Models
         ///     <para />
         /// </summary>
         public int Type { get; set; } = 0;
-
-        public Mode(string fullName)
-        {
-            FullName = fullName;
-        }
-
-        public Mode()
-        {
-        }
 
         /// <summary>
         ///     文件相对路径(必须是存在的文件)
@@ -78,30 +91,21 @@ namespace Netch.Models
                         relativePath.Replace(">", "");
                         relativePath.Replace(".h", ".txt");
 
-                        var mode = Global.Modes.FirstOrDefault(m => m!.FullName != null && m.RelativePath!.Equals(relativePath.ToString()));
+                        var mode = Global.Modes.FirstOrDefault(m => m.FullName != null && m.RelativePath!.Equals(relativePath.ToString()));
 
                         if (mode == null)
-                        {
-                            Logging.Warning($"{relativePath} file included in {Remark} not found");
-                        }
-                        else if (mode == this)
-                        {
-                            Logging.Warning("Can't self-reference");
-                        }
-                        else
-                        {
-                            if (mode.Type != Type)
-                            {
-                                Logging.Warning($"{mode.Remark}'s mode is not as same as {Remark}'s mode");
-                            }
-                            else
-                            {
-                                if (mode.Rule.Any(rule => rule.StartsWith("#include")))
-                                    Logging.Warning("Cannot reference mode that reference other mode");
-                                else
-                                    result.AddRange(mode.FullRule);
-                            }
-                        }
+                            throw new MessageException($"{relativePath} file included in {Remark} not found");
+
+                        if (mode == this)
+                            throw new MessageException("Can't self-reference");
+
+                        if (mode.Type != Type)
+                            throw new MessageException($"{mode.Remark}'s mode is not as same as {Remark}'s mode");
+
+                        if (mode.Rule.Any(rule => rule.StartsWith("#include")))
+                            throw new Exception("Cannot reference mode that reference other mode");
+
+                        result.AddRange(mode.FullRule);
                     }
                     else
                     {
@@ -111,6 +115,14 @@ namespace Netch.Models
 
                 return result;
             }
+        }
+
+        private List<string> ReadRules()
+        {
+            if (FullName == null || !File.Exists(FullName))
+                return new List<string>();
+
+            return File.ReadLines(FullName!).Skip(1).ToList();
         }
 
         public void WriteFile(string? fullName = null)
@@ -141,7 +153,7 @@ namespace Netch.Models
         /// <returns>模式文件字符串</returns>
         public string ToFileString()
         {
-            return $"# {Remark}, {Type}, {(BypassChina ? 1 : 0)}{Global.EOF}{string.Join(Global.EOF, Rule)}";
+            return $"# {Remark}, {Type}{Constants.EOF}{string.Join(Constants.EOF, Rule)}";
         }
     }
 
@@ -151,12 +163,6 @@ namespace Netch.Models
         public static bool TestNatRequired(this Mode mode)
         {
             return mode.Type is 0 or 2;
-        }
-
-        /// Socks5 分流是否能被有效实施
-        public static bool ClientRouting(this Mode mode)
-        {
-            return mode.Type is not (1 or 2);
         }
     }
 }

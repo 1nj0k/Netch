@@ -6,7 +6,9 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Netch.Forms;
+using Netch.Interfaces;
 using Netch.Models;
+using Netch.Models.Adapter;
 using Netch.Servers.Socks5;
 
 namespace Netch.Controllers
@@ -17,7 +19,7 @@ namespace Netch.Controllers
 
         public override string MainFile { get; protected set; } = "pcap2socks.exe";
 
-        protected override IEnumerable<string> StartedKeywords { get; } = new[] {"└"};
+        protected override IEnumerable<string> StartedKeywords { get; set; } = new[] { "└" };
 
         private readonly OutboundAdapter _outbound = new();
 
@@ -47,7 +49,7 @@ namespace Netch.Controllers
             Global.MainForm.BeginInvoke(new Action(() =>
             {
                 if (!_form!.IsDisposed)
-                    _form!.richTextBox1.AppendText(line + "\n");
+                    _form.richTextBox1.AppendText(line + "\n");
             }));
         }
 

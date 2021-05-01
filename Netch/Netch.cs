@@ -1,41 +1,47 @@
-﻿using System;
-using System.Diagnostics;
+﻿using Netch.Controllers;
+using Netch.Forms;
+using Netch.Utils;
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using Netch.Controllers;
-using Netch.Forms;
-using Netch.Utils;
-using Vanara.PInvoke;
-using static Vanara.PInvoke.User32;
+using static Vanara.PInvoke.Kernel32;
 
 namespace Netch
 {
     public static class Netch
     {
+        public static readonly SingleInstance.SingleInstance SingleInstance = new($"Global\\{nameof(Netch)}");
+
         /// <summary>
         ///     应用程序的主入口点
         /// </summary>
         [STAThread]
         public static void Main(string[] args)
         {
-            if (args.Contains("-console"))
-                if (!NativeMethods.AttachConsole(-1))
-                    NativeMethods.AllocConsole();
+#if DEBUG
+            AttachAllocConsole();
+#else
+            if (args.Contains(Constants.Parameter.Console))
+                AttachAllocConsole();
+#endif
+
+            if (args.Contains(Constants.Parameter.ForceUpdate))
+                Flags.AlwaysShowNewVersionFound = true;
 
             // 设置当前目录
             Directory.SetCurrentDirectory(Global.NetchDir);
-            Environment.SetEnvironmentVariable("PATH",
-                Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Process) + ";" + Path.Combine(Global.NetchDir, "bin"),
-                EnvironmentVariableTarget.Process);
+            var binPath = Path.Combine(Global.NetchDir, "bin");
+            Environment.SetEnvironmentVariable("PATH", $"{Environment.GetEnvironmentVariable("PATH")};{binPath}");
+            AddDllDirectory(binPath);
 
             Updater.Updater.CleanOld(Global.NetchDir);
 
             // 预创建目录
-            var directories = new[] {"mode\\Custom", "data", "i18n", "logging"};
+            var directories = new[] { "mode\\Custom", "data", "i18n", "logging" };
             foreach (var item in directories)
                 if (!Directory.Exists(item))
                     Directory.CreateDirectory(item);
@@ -43,14 +49,15 @@ namespace Netch
             // 加载配置
             Configuration.Load();
 
-            // 检查是否已经运行
-            if (!Global.Mutex.WaitOne(0, false))
+            if (!SingleInstance.IsFirstInstance)
             {
-                ShowOpened();
-
-                // 退出进程
-                Environment.Exit(1);
+                SingleInstance.PassArgumentsToFirstInstance(args.Append(Constants.Parameter.Show));
+                Environment.Exit(0);
+                return;
             }
+
+            SingleInstance.ArgumentsReceived.Subscribe(SingleInstance_ArgumentsReceived);
+            SingleInstance.ListenForArgumentsFromSuccessiveInstances();
 
             // 清理上一次的日志文件，防止淤积占用磁盘空间
             if (Directory.Exists("logging"))
@@ -73,58 +80,37 @@ namespace Netch
                 Environment.Exit(2);
             }
 
-            Logging.Info($"版本: {UpdateChecker.Owner}/{UpdateChecker.Repo}@{UpdateChecker.Version}");
-            Task.Run(() => { Logging.Info($"主程序 SHA256: {Utils.Utils.SHA256CheckSum(Global.NetchExecutable)}"); });
+            Global.Logger.Info($"版本: {UpdateChecker.Owner}/{UpdateChecker.Repo}@{UpdateChecker.Version}");
+            Task.Run(() => { Global.Logger.Info($"主程序 SHA256: {Utils.Utils.SHA256CheckSum(Global.NetchExecutable)}"); });
 
             // 绑定错误捕获
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += Application_OnException;
 
+            Application.SetHighDpiMode(HighDpiMode.SystemAware);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(Global.MainForm);
         }
 
-        public static void Application_OnException(object sender, ThreadExceptionEventArgs e)
+        private static void AttachAllocConsole()
         {
-            Logging.Error(e.Exception.ToString());
-            Utils.Utils.Open(Logging.LogFile);
+            if (!AttachConsole(ATTACH_PARENT_PROCESS))
+                AllocConsole();
         }
 
-        private static void ShowOpened()
+        public static void Application_OnException(object sender, ThreadExceptionEventArgs e)
         {
-            HWND GetWindowHandleByPidAndTitle(int process, string title)
+            Global.Logger.Error(e.Exception.ToString());
+            Global.Logger.ShowLog();
+        }
+
+        private static void SingleInstance_ArgumentsReceived(IEnumerable<string> args)
+        {
+            if (args.Contains(Constants.Parameter.Show))
             {
-                var sb = new StringBuilder(256);
-                HWND pLast = IntPtr.Zero;
-                do
-                {
-                    pLast = FindWindowEx(HWND.NULL, pLast, null, null);
-                    GetWindowThreadProcessId(pLast, out var id);
-                    if (id != process)
-                        continue;
-
-                    if (GetWindowText(pLast, sb, sb.Capacity) <= 0)
-                        continue;
-
-                    if (sb.ToString().Equals(title))
-                        return pLast;
-                } while (pLast != IntPtr.Zero);
-
-                return HWND.NULL;
+                Global.MainForm.ShowMainFormToolStripButton_Click(null!, null!);
             }
-
-            var self = Process.GetCurrentProcess();
-            var activeProcess = Process.GetProcessesByName("Netch").Single(p => p.Id != self.Id);
-            HWND handle = activeProcess.MainWindowHandle;
-            if (handle.IsNull)
-                handle = GetWindowHandleByPidAndTitle(activeProcess.Id, "Netch");
-
-            if (handle.IsNull)
-                return;
-
-            ShowWindow(handle, ShowWindowCommand.SW_NORMAL);
-            SwitchToThisWindow(handle, true);
         }
     }
 }

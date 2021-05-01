@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using Netch.Controllers;
+using Netch.Interfaces;
 using Netch.Models;
 using Netch.Servers.V2ray;
 
@@ -16,13 +16,13 @@ namespace Netch.Servers.VLESS
 
         public string ShortName { get; } = "VL";
 
-        public string[] UriScheme { get; } = {"vless"};
+        public string[] UriScheme { get; } = { "vless" };
 
         public Type ServerType { get; } = typeof(VLESS);
 
         public void Edit(Server s)
         {
-            new VLESSForm.VLESSForm((VLESS) s).ShowDialog();
+            new VLESSForm.VLESSForm((VLESS)s).ShowDialog();
         }
 
         public void Create()

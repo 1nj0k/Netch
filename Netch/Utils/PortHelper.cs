@@ -4,13 +4,15 @@ using System.Diagnostics;
 using System.Linq;
 using System.Net.NetworkInformation;
 using Netch.Models;
+using static Vanara.PInvoke.IpHlpApi;
+using static Vanara.PInvoke.Ws2_32;
 
 namespace Netch.Utils
 {
     public static class PortHelper
     {
-        private static readonly List<Range> TCPReservedRanges = new();
-        private static readonly List<Range> UDPReservedRanges = new();
+        private static readonly List<NumberRange> TCPReservedRanges = new();
+        private static readonly List<NumberRange> UDPReservedRanges = new();
         private static readonly IPGlobalProperties NetInfo = IPGlobalProperties.GetIPGlobalProperties();
 
         static PortHelper()
@@ -22,11 +24,21 @@ namespace Netch.Utils
             }
             catch (Exception e)
             {
-                Logging.Error("获取保留端口失败: " + e);
+                Global.Logger.Error("获取保留端口失败: " + e);
             }
         }
 
-        private static void GetReservedPortRange(PortType portType, ref List<Range> targetList)
+        public static IEnumerable<Process> GetProcessByUsedTcpPort(ushort port)
+        {
+            if (port == 0)
+                throw new ArgumentOutOfRangeException();
+
+            var row = GetTcpTable2().Where(r => ntohs((ushort)r.dwLocalPort) == port).Where(r => r.dwOwningPid is not (0 or 4));
+
+            return row.Select(r => Process.GetProcessById((int)r.dwOwningPid));
+        }
+
+        private static void GetReservedPortRange(PortType portType, ref List<NumberRange> targetList)
         {
             var process = new Process
             {
@@ -52,7 +64,7 @@ namespace Netch.Utils
                 if (!ushort.TryParse(value[0], out var start) || !ushort.TryParse(value[1], out var end))
                     continue;
 
-                targetList.Add(new Range(start, end));
+                targetList.Add(new NumberRange(start, end));
             }
         }
 
@@ -131,7 +143,7 @@ namespace Netch.Utils
             var random = new Random();
             for (ushort i = 0; i < 55535; i++)
             {
-                var p = (ushort) random.Next(10000, 65535);
+                var p = (ushort)random.Next(10000, 65535);
                 try
                 {
                     CheckPort(p, portType);

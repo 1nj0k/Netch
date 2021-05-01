@@ -1,3 +1,5 @@
+using Netch.Models;
+using Netch.Utils;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -7,15 +9,13 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Netch.Models;
-using Netch.Utils;
 using Timer = System.Timers.Timer;
 
 namespace Netch.Controllers
 {
     public abstract class Guard
     {
-        private readonly Timer _flushFileStreamTimer = new(300) {AutoReset = true};
+        private readonly Timer _flushFileStreamTimer = new(300) { AutoReset = true };
 
         private FileStream? _logFileStream;
 
@@ -30,12 +30,12 @@ namespace Netch.Controllers
         /// <summary>
         ///     成功启动关键词
         /// </summary>
-        protected virtual IEnumerable<string> StartedKeywords { get; } = new List<string>();
+        protected virtual IEnumerable<string> StartedKeywords { get; set; } = new List<string>();
 
         /// <summary>
         ///     启动失败关键词
         /// </summary>
-        protected virtual IEnumerable<string> StoppedKeywords { get; } = new List<string>();
+        protected virtual IEnumerable<string> StoppedKeywords { get; set; } = new List<string>();
 
         public abstract string Name { get; }
 
@@ -84,7 +84,7 @@ namespace Netch.Controllers
             }
             catch (Win32Exception e)
             {
-                Logging.Error($"停止 {MainFile} 错误：\n" + e);
+                Global.Logger.Error($"停止 {MainFile} 错误：\n" + e);
             }
             catch
             {
@@ -268,7 +268,7 @@ namespace Netch.Controllers
             }
             catch (Exception exception)
             {
-                Logging.Warning($"写入 {Name} 日志错误：\n" + exception.Message);
+                Global.Logger.Warning($"写入 {Name} 日志错误：\n" + exception.Message);
             }
         }
     }

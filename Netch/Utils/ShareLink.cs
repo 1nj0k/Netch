@@ -1,12 +1,12 @@
-﻿using System;
+﻿using Netch.Models;
+using Netch.Servers.Shadowsocks;
+using Netch.Servers.Shadowsocks.Models;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
-using Netch.Models;
-using Netch.Servers.Shadowsocks;
-using Netch.Servers.Shadowsocks.Models;
 
 namespace Netch.Utils
 {
@@ -32,17 +32,16 @@ namespace Netch.Utils
 
             try
             {
-                list.AddRange(JsonSerializer.Deserialize<List<ShadowsocksConfig>>(text)
-                    .Select(server => new Shadowsocks
-                    {
-                        Hostname = server.server,
-                        Port = server.server_port,
-                        EncryptMethod = server.method,
-                        Password = server.password,
-                        Remark = server.remarks,
-                        Plugin = server.plugin,
-                        PluginOption = server.plugin_opts
-                    }));
+                list.AddRange(JsonSerializer.Deserialize<List<ShadowsocksConfig>>(text)!.Select(server => new Shadowsocks
+                {
+                    Hostname = server.server,
+                    Port = server.server_port,
+                    EncryptMethod = server.method,
+                    Password = server.password,
+                    Remark = server.remarks,
+                    Plugin = server.plugin,
+                    PluginOption = server.plugin_opts
+                }));
             }
             catch (JsonException)
             {
@@ -56,16 +55,16 @@ namespace Netch.Utils
                     catch (Exception e)
                     {
                         errorFlag = true;
-                        Logging.Error(e.ToString());
+                        Global.Logger.Error(e.ToString());
                     }
                 }
 
                 if (errorFlag)
-                    Utils.Open(Logging.LogFile);
+                    Global.Logger.ShowLog();
             }
             catch (Exception e)
             {
-                Logging.Error(e.ToString());
+                Global.Logger.Error(e.ToString());
             }
 
             return list;
@@ -90,7 +89,7 @@ namespace Netch.Utils
                 if (util != null)
                     list.AddRange(util.ParseUri(text));
                 else
-                    Logging.Warning($"无法处理 {scheme} 协议订阅链接");
+                    Global.Logger.Warning($"无法处理 {scheme} 协议订阅链接");
             }
 
             foreach (var node in list.Where(node => !node.Remark.IsNullOrWhiteSpace()))
@@ -123,7 +122,7 @@ namespace Netch.Utils
             return JsonSerializer.Deserialize<Server>(text,
                 new JsonSerializerOptions
                 {
-                    Converters = {new ServerConverterWithTypeDiscriminator()}
+                    Converters = { new ServerConverterWithTypeDiscriminator() }
                 })!;
         }
 
@@ -159,7 +158,7 @@ namespace Netch.Utils
 
         private static string RemoveEmoji(string text)
         {
-            byte[] emojiBytes = {240, 159};
+            byte[] emojiBytes = { 240, 159 };
             var remark = Encoding.UTF8.GetBytes(text);
             var startIndex = 0;
             while (remark.Length > startIndex + 1 && remark[startIndex] == emojiBytes[0] && remark[startIndex + 1] == emojiBytes[1])

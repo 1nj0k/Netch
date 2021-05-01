@@ -35,7 +35,6 @@ namespace Netch.Forms.Mode
             this.components = new System.ComponentModel.Container();
             this.ConfigurationGroupBox = new System.Windows.Forms.GroupBox();
             this.comboBox1 = new System.Windows.Forms.ComboBox();
-            this.UseCustomFilenameBox = new System.Windows.Forms.CheckBox();
             this.FilenameLabel = new System.Windows.Forms.Label();
             this.FilenameTextBox = new System.Windows.Forms.TextBox();
             this.ActionLabel = new System.Windows.Forms.Label();
@@ -54,7 +53,6 @@ namespace Netch.Forms.Mode
             // ConfigurationGroupBox
             // 
             this.ConfigurationGroupBox.Controls.Add(this.comboBox1);
-            this.ConfigurationGroupBox.Controls.Add(this.UseCustomFilenameBox);
             this.ConfigurationGroupBox.Controls.Add(this.FilenameLabel);
             this.ConfigurationGroupBox.Controls.Add(this.FilenameTextBox);
             this.ConfigurationGroupBox.Controls.Add(this.ActionLabel);
@@ -74,34 +72,24 @@ namespace Netch.Forms.Mode
             this.comboBox1.FormattingEnabled = true;
             this.comboBox1.Location = new System.Drawing.Point(84, 49);
             this.comboBox1.Name = "comboBox1";
-            this.comboBox1.Size = new System.Drawing.Size(138, 20);
+            this.comboBox1.Size = new System.Drawing.Size(138, 25);
             this.comboBox1.TabIndex = 11;
-            // 
-            // UseCustomFilenameBox
-            // 
-            this.UseCustomFilenameBox.AutoSize = true;
-            this.UseCustomFilenameBox.Location = new System.Drawing.Point(84, 100);
-            this.UseCustomFilenameBox.Name = "UseCustomFilenameBox";
-            this.UseCustomFilenameBox.Size = new System.Drawing.Size(138, 16);
-            this.UseCustomFilenameBox.TabIndex = 9;
-            this.UseCustomFilenameBox.Text = "Use Custom Filename";
-            this.UseCustomFilenameBox.UseVisualStyleBackColor = true;
             // 
             // FilenameLabel
             // 
             this.FilenameLabel.AutoSize = true;
             this.FilenameLabel.Location = new System.Drawing.Point(12, 79);
             this.FilenameLabel.Name = "FilenameLabel";
-            this.FilenameLabel.Size = new System.Drawing.Size(53, 12);
+            this.FilenameLabel.Size = new System.Drawing.Size(59, 17);
             this.FilenameLabel.TabIndex = 6;
             this.FilenameLabel.Text = "Filename";
             // 
             // FilenameTextBox
             // 
-            this.FilenameTextBox.DataBindings.Add(new System.Windows.Forms.Binding("Enabled", this.UseCustomFilenameBox, "Checked", true));
             this.FilenameTextBox.Location = new System.Drawing.Point(84, 76);
             this.FilenameTextBox.Name = "FilenameTextBox";
-            this.FilenameTextBox.Size = new System.Drawing.Size(250, 21);
+            this.FilenameTextBox.ReadOnly = true;
+            this.FilenameTextBox.Size = new System.Drawing.Size(250, 23);
             this.FilenameTextBox.TabIndex = 5;
             // 
             // ActionLabel
@@ -109,7 +97,7 @@ namespace Netch.Forms.Mode
             this.ActionLabel.AutoSize = true;
             this.ActionLabel.Location = new System.Drawing.Point(12, 52);
             this.ActionLabel.Name = "ActionLabel";
-            this.ActionLabel.Size = new System.Drawing.Size(41, 12);
+            this.ActionLabel.Size = new System.Drawing.Size(44, 17);
             this.ActionLabel.TabIndex = 0;
             this.ActionLabel.Text = "Action";
             // 
@@ -117,7 +105,7 @@ namespace Netch.Forms.Mode
             // 
             this.RemarkTextBox.Location = new System.Drawing.Point(84, 22);
             this.RemarkTextBox.Name = "RemarkTextBox";
-            this.RemarkTextBox.Size = new System.Drawing.Size(250, 21);
+            this.RemarkTextBox.Size = new System.Drawing.Size(250, 23);
             this.RemarkTextBox.TabIndex = 1;
             this.RemarkTextBox.TextChanged += new System.EventHandler(this.RemarkTextBox_TextChanged);
             // 
@@ -126,16 +114,16 @@ namespace Netch.Forms.Mode
             this.RemarkLabel.AutoSize = true;
             this.RemarkLabel.Location = new System.Drawing.Point(12, 25);
             this.RemarkLabel.Name = "RemarkLabel";
-            this.RemarkLabel.Size = new System.Drawing.Size(41, 12);
+            this.RemarkLabel.Size = new System.Drawing.Size(53, 17);
             this.RemarkLabel.TabIndex = 0;
             this.RemarkLabel.Text = "Remark";
             // 
             // containerControl1
             // 
             this.containerControl1.Controls.Add(this.richTextBox1);
-            this.containerControl1.Location = new System.Drawing.Point(6, 125);
+            this.containerControl1.Location = new System.Drawing.Point(6, 103);
             this.containerControl1.Name = "containerControl1";
-            this.containerControl1.Size = new System.Drawing.Size(328, 224);
+            this.containerControl1.Size = new System.Drawing.Size(328, 246);
             this.containerControl1.TabIndex = 10;
             this.containerControl1.Text = "containerControl1";
             // 
@@ -144,13 +132,14 @@ namespace Netch.Forms.Mode
             this.richTextBox1.Dock = System.Windows.Forms.DockStyle.Fill;
             this.richTextBox1.Location = new System.Drawing.Point(0, 0);
             this.richTextBox1.Name = "richTextBox1";
-            this.richTextBox1.Size = new System.Drawing.Size(328, 224);
+            this.richTextBox1.Size = new System.Drawing.Size(328, 246);
             this.richTextBox1.TabIndex = 0;
             this.richTextBox1.Text = "";
             // 
             // contextMenuStrip
             // 
-            this.contextMenuStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {this.DeleteToolStripMenuItem});
+            this.contextMenuStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.DeleteToolStripMenuItem});
             this.contextMenuStrip.Name = "contextMenuStrip";
             this.contextMenuStrip.Size = new System.Drawing.Size(114, 26);
             // 
@@ -172,7 +161,7 @@ namespace Netch.Forms.Mode
             // 
             // Route
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 17F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(356, 419);
             this.Controls.Add(this.ConfigurationGroupBox);
@@ -186,6 +175,7 @@ namespace Netch.Forms.Mode
             this.containerControl1.ResumeLayout(false);
             this.contextMenuStrip.ResumeLayout(false);
             this.ResumeLayout(false);
+
         }
 
         public System.Windows.Forms.GroupBox ConfigurationGroupBox;
@@ -198,7 +188,6 @@ namespace Netch.Forms.Mode
         private System.Windows.Forms.Label RemarkLabel;
         private System.Windows.Forms.TextBox RemarkTextBox;
         private System.Windows.Forms.RichTextBox richTextBox1;
-        private System.Windows.Forms.CheckBox UseCustomFilenameBox;
 
         #endregion
 

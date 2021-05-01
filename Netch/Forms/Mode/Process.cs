@@ -1,12 +1,13 @@
-﻿using System;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Windows.Forms;
-using Microsoft.WindowsAPICodePack.Dialogs;
+﻿using Microsoft.WindowsAPICodePack.Dialogs;
 using Netch.Controllers;
+using Netch.Models;
 using Netch.Properties;
 using Netch.Utils;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Windows.Forms;
 
 namespace Netch.Forms.Mode
 {
@@ -31,103 +32,48 @@ namespace Netch.Forms.Mode
             CheckForIllegalCrossThreadCalls = false;
 
             _mode = mode;
-            if (mode != null)
+        }
+
+        #region Model
+
+        public IEnumerable<string> Rules => RuleRichTextBox.Lines;
+
+        private void RuleAdd(string value)
+        {
+            RuleRichTextBox.AppendText($"{value}\n");
+        }
+
+        private void RuleAddRange(IEnumerable<string> value)
+        {
+            foreach (string s in value)
+            {
+                RuleAdd(s);
+            }
+        }
+
+        #endregion
+
+        public void ModeForm_Load(object sender, EventArgs e)
+        {
+            if (_mode != null)
             {
                 Text = "Edit Process Mode";
 
                 RemarkTextBox.TextChanged -= RemarkTextBox_TextChanged;
-                FilenameTextBox.Enabled = UseCustomFilenameBox.Enabled = false;
-
-                RemarkTextBox.Text = mode.Remark;
-                FilenameTextBox.Text = mode.RelativePath;
-                RuleListBox.Items.AddRange(mode.Rule.ToArray());
+                RemarkTextBox.Text = _mode.Remark;
+                FilenameTextBox.Text = _mode.RelativePath;
+                RuleAddRange(_mode.Rule);
             }
-        }
 
-        /// <summary>
-        ///     是否被编辑过
-        /// </summary>
-        public bool Edited { get; private set; }
-
-        /// <summary>
-        ///     扫描目录
-        /// </summary>
-        /// <param name="DirName">路径</param>
-        public void ScanDirectory(string DirName)
-        {
-            try
-            {
-                RuleListBox.Items.AddRange(Directory.GetFiles(DirName, "*.exe", SearchOption.AllDirectories)
-                    .Select(f => Path.GetFileName(f))
-                    .ToArray());
-            }
-            catch (Exception)
-            {
-                // ignored
-            }
-        }
-
-        public void ModeForm_Load(object sender, EventArgs e)
-        {
             i18N.TranslateForm(this);
-            i18N.Translate(contextMenuStrip);
         }
 
-        /// <summary>
-        ///     listBox右键菜单
-        /// </summary>
-        private void RuleListBox_MouseUp(object sender, MouseEventArgs e)
-        {
-            RuleListBox.SelectedIndex = RuleListBox.IndexFromPoint(e.X, e.Y);
-            if (RuleListBox.SelectedIndex == -1)
-                return;
-
-            if (e.Button == MouseButtons.Right)
-                contextMenuStrip.Show(RuleListBox, e.Location);
-        }
-
-        private void deleteRule_Click(object sender, EventArgs e)
-        {
-            if (RuleListBox.SelectedIndex == -1)
-                return;
-
-            RuleListBox.Items.RemoveAt(RuleListBox.SelectedIndex);
-            Edited = true;
-        }
-
-        private async void AddButton_Click(object sender, EventArgs e)
-        {
-            await Task.Run(() =>
-            {
-                if (string.IsNullOrWhiteSpace(ProcessNameTextBox.Text))
-                {
-                    MessageBoxX.Show(i18N.Translate("Please enter an process name (xxx.exe)"));
-                    return;
-                }
-
-                if (!NFController.CheckCppRegex(ProcessNameTextBox.Text))
-                {
-                    MessageBoxX.Show("Rule does not conform to C++ regular expression syntax");
-                    return;
-                }
-
-                var process = ProcessNameTextBox.Text;
-
-                if (!RuleListBox.Items.Contains(process))
-                    RuleListBox.Items.Add(process);
-
-                Edited = true;
-                RuleListBox.SelectedIndex = RuleListBox.Items.IndexOf(process);
-                ProcessNameTextBox.Text = string.Empty;
-            });
-        }
-
-        private void ScanButton_Click(object sender, EventArgs e)
+        private void SelectButton_Click(object sender, EventArgs e)
         {
             var dialog = new CommonOpenFileDialog
             {
                 IsFolderPicker = true,
-                Multiselect = false,
+                Multiselect = true,
                 Title = i18N.Translate("Select a folder"),
                 AddToMostRecentlyUsedList = false,
                 EnsurePathExists = true,
@@ -136,14 +82,20 @@ namespace Netch.Forms.Mode
 
             if (dialog.ShowDialog(Handle) == CommonFileDialogResult.Ok)
             {
-                ScanDirectory(dialog.FileName);
-                MessageBoxX.Show(i18N.Translate("Scan completed"));
+                foreach (string p in dialog.FileNames)
+                {
+                    string path = p;
+                    if (!path.EndsWith(@"\"))
+                        path += @"\";
+
+                    RuleAdd($"^{path.ToRegexString()}");
+                }
             }
         }
 
         public void ControlButton_Click(object sender, EventArgs e)
         {
-            if (RuleListBox.Items.Count == 0)
+            if (!RuleRichTextBox.Lines.Any())
             {
                 MessageBoxX.Show(i18N.Translate("Unable to add empty rule"));
                 return;
@@ -165,16 +117,14 @@ namespace Netch.Forms.Mode
             {
                 _mode.Remark = RemarkTextBox.Text;
                 _mode.Rule.Clear();
-                _mode.Rule.AddRange(RuleListBox.Items.Cast<string>());
+                _mode.Rule.AddRange(RuleRichTextBox.Lines);
 
                 _mode.WriteFile();
-                Global.MainForm.LoadModes();
-                Edited = false;
                 MessageBoxX.Show(i18N.Translate("Mode updated successfully"));
             }
             else
             {
-                var relativePath = $"Custom\\{FilenameTextBox.Text}.txt";
+                var relativePath = FilenameTextBox.Text;
                 var fullName = ModeHelper.GetFullPath(relativePath);
                 if (File.Exists(fullName))
                 {
@@ -184,30 +134,78 @@ namespace Netch.Forms.Mode
 
                 var mode = new Models.Mode(fullName)
                 {
-                    BypassChina = false,
                     Type = 0,
                     Remark = RemarkTextBox.Text
                 };
 
-                mode.Rule.AddRange(RuleListBox.Items.Cast<string>());
+                mode.Rule.AddRange(RuleRichTextBox.Lines);
 
                 mode.WriteFile();
-                ModeHelper.Add(mode);
                 MessageBoxX.Show(i18N.Translate("Mode added successfully"));
             }
 
             Close();
         }
 
-        private async void RemarkTextBox_TextChanged(object sender, EventArgs e)
+        private void RemarkTextBox_TextChanged(object? sender, EventArgs? e)
         {
-            await Task.Run(() =>
+            BeginInvoke(new Action(() =>
             {
-                if (!UseCustomFilenameBox.Checked)
+                FilenameTextBox.Text = FilenameTextBox.Text = ModeEditorUtils.GetCustomModeRelativePath(RemarkTextBox.Text);
+            }));
+        }
+
+        private void ScanButton_Click(object sender, EventArgs e)
+        {
+            var dialog = new CommonOpenFileDialog
+            {
+                IsFolderPicker = true,
+                Multiselect = false,
+                Title = i18N.Translate("Select a folder"),
+                AddToMostRecentlyUsedList = false,
+                EnsurePathExists = true,
+                NavigateToShortcut = true
+            };
+
+            if (dialog.ShowDialog(Handle) == CommonFileDialogResult.Ok)
+            {
+                var path = dialog.FileName;
+                var list = new List<string>();
+                const uint maxCount = 50;
+                try
                 {
-                    FilenameTextBox.Text = ModeEditorUtils.ToSafeFileName(RemarkTextBox.Text);
+                    ScanDirectory(path, list);
                 }
-            });
+                catch
+                {
+                    MessageBoxX.Show(i18N.Translate($"The number of executable files in the \"{path}\" directory is greater than {maxCount}"),
+                        LogLevel.WARNING);
+
+                    return;
+                }
+
+                RuleAddRange(list);
+            }
+        }
+
+        private void ScanDirectory(string directory, List<string> list, uint maxCount = 30)
+        {
+            foreach (string dir in Directory.GetDirectories(directory))
+                ScanDirectory(dir, list, maxCount);
+
+            list.AddRange(
+                Directory.GetFiles(directory).Select(s => Path.GetFileName(s)).Where(s => s.EndsWith(".exe")).Select(s => s.ToRegexString()));
+
+            if (maxCount != 0 && list.Count > maxCount)
+                throw new Exception("The number of results is greater than maxCount");
+        }
+
+        private void ValidationButton_Click(object sender, EventArgs e)
+        {
+            if (!NFController.CheckRules(Rules, out var results))
+                MessageBoxX.Show(NFController.GenerateInvalidRulesMessage(results), LogLevel.WARNING);
+            else
+                MessageBoxX.Show("Fine");
         }
     }
 }

@@ -1,13 +1,13 @@
+using Netch.Models;
+using Netch.Properties;
+using Netch.Utils;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Net;
-using System.Threading.Tasks;
 using System.Windows.Forms;
-using Netch.Properties;
-using Netch.Utils;
 
 namespace Netch.Forms
 {
@@ -26,25 +26,19 @@ namespace Netch.Forms
             #region General
 
             BindTextBox<ushort>(Socks5PortTextBox,
-                p => p.ToString() != HTTPPortTextBox.Text && p.ToString() != RedirectorTextBox.Text,
+                p => p.ToString() != HTTPPortTextBox.Text,
                 p => Global.Settings.Socks5LocalPort = p,
                 Global.Settings.Socks5LocalPort);
 
             BindTextBox<ushort>(HTTPPortTextBox,
-                p => p.ToString() != Socks5PortTextBox.Text && p.ToString() != RedirectorTextBox.Text,
+                p => p.ToString() != Socks5PortTextBox.Text,
                 p => Global.Settings.HTTPLocalPort = p,
                 Global.Settings.HTTPLocalPort);
 
-            BindTextBox<ushort>(RedirectorTextBox,
-                p => p.ToString() != Socks5PortTextBox.Text && p.ToString() != HTTPPortTextBox.Text,
-                p => Global.Settings.RedirectorTCPPort = p,
-                Global.Settings.RedirectorTCPPort);
-
             BindCheckBox(AllowDevicesCheckBox,
                 c => Global.Settings.LocalAddress = AllowDevicesCheckBox.Checked ? "0.0.0.0" : "127.0.0.1",
-                Global.Settings.LocalAddress switch {"127.0.0.1" => false, "0.0.0.0" => true, _ => false});
+                Global.Settings.LocalAddress switch { "127.0.0.1" => false, "0.0.0.0" => true, _ => false });
 
-            BindCheckBox(BootShadowsocksFromDLLCheckBox, c => Global.Settings.BootShadowsocksFromDLL = c, Global.Settings.BootShadowsocksFromDLL);
             BindCheckBox(ResolveServerHostnameCheckBox, c => Global.Settings.ResolveServerHostname = c, Global.Settings.ResolveServerHostname);
 
             BindRadioBox(ICMPingRadioBtn, _ => { }, !Global.Settings.ServerTCPing);
@@ -69,7 +63,7 @@ namespace Netch.Forms
             }
             catch (Exception e)
             {
-                Logging.Warning($"Load stun.txt failed: {e.Message}");
+                Global.Logger.Warning($"Load stun.txt failed: {e.Message}");
                 stuns = null;
             }
 
@@ -98,33 +92,33 @@ namespace Netch.Forms
                 Global.Settings.STUN_Server + ":" + Global.Settings.STUN_Server_Port,
                 stuns);
 
-            BindTextBox<string>(AclAddrTextBox, s => true, s => Global.Settings.ACL = s, Global.Settings.ACL);
-
-            BindListComboBox(LanguageComboBox,
-                o => Global.Settings.Language = o.ToString(),
-                i18N.GetTranslateList().Cast<object>().ToArray(),
-                Global.Settings.Language);
+            BindListComboBox(LanguageComboBox, o => Global.Settings.Language = o.ToString(), i18N.GetTranslateList(), Global.Settings.Language);
 
             #endregion
 
             #region Process Mode
 
-            BindCheckBox(DNSRedirectorCheckBox, b => Global.Settings.RedirectDNS = b, Global.Settings.RedirectDNS);
+            BindCheckBox(DNSHijackCheckBox, b => Global.Settings.Redirector.DNSHijack = b, Global.Settings.Redirector.DNSHijack);
 
-            BindTextBox(ModifiedDNSTextBox, s => DnsUtils.TrySplit(s, out _, 2), s => Global.Settings.RedirectDNSAddr = s, Global.Settings.RedirectDNSAddr);
+            BindTextBox(DNSHijackHostTextBox, s => true, s => Global.Settings.Redirector.DNSHijackHost = s, Global.Settings.Redirector.DNSHijackHost);
 
-            BindCheckBox(ICMPRedirectorCheckBox, b => Global.Settings.RedirectICMP = b, Global.Settings.RedirectICMP);
+            BindCheckBox(ICMPHijackCheckBox, b => Global.Settings.Redirector.ICMPHijack = b, Global.Settings.Redirector.ICMPHijack);
 
-            BindTextBox(ModifiedICMPTextBox, s => DnsUtils.TrySplit(s, out _, 2), s => Global.Settings.RedirectICMPAddr = s, Global.Settings.RedirectICMPAddr);
+            BindTextBox(ICMPHijackHostTextBox,
+                s => IPAddress.TryParse(s, out _),
+                s => Global.Settings.Redirector.ICMPHost = s,
+                Global.Settings.Redirector.ICMPHost);
 
-            BindCheckBox(RedirectorSSCheckBox, s => Global.Settings.RedirectorSS = s, Global.Settings.RedirectorSS);
+            BindCheckBox(RedirectorSSCheckBox, s => Global.Settings.Redirector.RedirectorSS = s, Global.Settings.Redirector.RedirectorSS);
 
-            BindCheckBox(ChildProcessHandleCheckBox, s => Global.Settings.ChildProcessHandle = s, Global.Settings.ChildProcessHandle);
+            BindCheckBox(ChildProcessHandleCheckBox,
+                s => Global.Settings.Redirector.ChildProcessHandle = s,
+                Global.Settings.Redirector.ChildProcessHandle);
 
             BindListComboBox(ProcessProxyProtocolComboBox,
-                s => Global.Settings.ProcessProxyProtocol = (PortType) Enum.Parse(typeof(PortType), s.ToString(), false),
-                Enum.GetNames(typeof(PortType)).Cast<object>().ToArray(),
-                Global.Settings.ProcessProxyProtocol.ToString());
+                s => Global.Settings.Redirector.ProxyProtocol = (PortType)Enum.Parse(typeof(PortType), s.ToString(), false),
+                Enum.GetNames(typeof(PortType)),
+                Global.Settings.Redirector.ProxyProtocol.ToString());
 
             #endregion
 
@@ -148,16 +142,15 @@ namespace Netch.Forms
             BindCheckBox(UseCustomDNSCheckBox, b => { Global.Settings.TUNTAP.UseCustomDNS = b; }, Global.Settings.TUNTAP.UseCustomDNS);
 
             BindTextBox(TUNTAPDNSTextBox,
-                s => !UseCustomDNSCheckBox.Checked || DnsUtils.TrySplit(s, out _, 2),
+                _ => true,
                 s =>
                 {
                     if (UseCustomDNSCheckBox.Checked)
-                        Global.Settings.TUNTAP.DNS = DnsUtils.Split(s).ToList();
+                        Global.Settings.TUNTAP.HijackDNS = s;
                 },
-                DnsUtils.Join(Global.Settings.TUNTAP.DNS));
+                Global.Settings.TUNTAP.HijackDNS);
 
             BindCheckBox(ProxyDNSCheckBox, b => Global.Settings.TUNTAP.ProxyDNS = b, Global.Settings.TUNTAP.ProxyDNS);
-            BindCheckBox(UseFakeDNSCheckBox, b => Global.Settings.TUNTAP.UseFakeDNS = b, Global.Settings.TUNTAP.UseFakeDNS);
 
             #endregion
 
@@ -218,17 +211,11 @@ namespace Netch.Forms
 
             #region AioDNS
 
-            BindTextBox(AioDNSRulePathTextBox, s => true, s => Global.Settings.AioDNS.RulePath = s, Global.Settings.AioDNS.RulePath);
+            BindTextBox(AioDNSRulePathTextBox, _ => true, s => Global.Settings.AioDNS.RulePath = s, Global.Settings.AioDNS.RulePath);
 
-            BindTextBox(ChinaDNSTextBox,
-                s => IPAddress.TryParse(s, out _),
-                s => Global.Settings.AioDNS.ChinaDNS = s,
-                Global.Settings.AioDNS.ChinaDNS);
+            BindTextBox(ChinaDNSTextBox, _ => true, s => Global.Settings.AioDNS.ChinaDNS = s, Global.Settings.AioDNS.ChinaDNS);
 
-            BindTextBox(OtherDNSTextBox,
-                s => IPAddress.TryParse(s, out _),
-                s => Global.Settings.AioDNS.OtherDNS = s,
-                Global.Settings.AioDNS.OtherDNS);
+            BindTextBox(OtherDNSTextBox, _ => true, s => Global.Settings.AioDNS.OtherDNS = s, Global.Settings.AioDNS.OtherDNS);
 
             #endregion
         }
@@ -236,13 +223,12 @@ namespace Netch.Forms
         private void SettingForm_Load(object sender, EventArgs e)
         {
             TUNTAPUseCustomDNSCheckBox_CheckedChanged(null, null);
-            Task.Run(() => BeginInvoke(new Action(() => UseFakeDNSCheckBox.Visible = Global.Flags.SupportFakeDns)));
         }
 
         private void TUNTAPUseCustomDNSCheckBox_CheckedChanged(object? sender, EventArgs? e)
         {
             if (UseCustomDNSCheckBox.Checked)
-                TUNTAPDNSTextBox.Text = Global.Settings.TUNTAP.DNS.Any() ? DnsUtils.Join(Global.Settings.TUNTAP.DNS) : "1.1.1.1";
+                TUNTAPDNSTextBox.Text = Global.Settings.TUNTAP.HijackDNS;
             else
                 TUNTAPDNSTextBox.Text = "AioDNS";
         }
@@ -298,7 +284,7 @@ namespace Netch.Forms
                 {
                     try
                     {
-                        return check.Invoke((T) Convert.ChangeType(s, typeof(T)));
+                        return check.Invoke((T)Convert.ChangeType(s, typeof(T)));
                     }
                     catch
                     {
@@ -306,29 +292,34 @@ namespace Netch.Forms
                     }
                 });
 
-            _saveActions.Add(control, c => save.Invoke((T) Convert.ChangeType(((TextBox) c).Text, typeof(T))));
+            _saveActions.Add(control, c => save.Invoke((T)Convert.ChangeType(((TextBox)c).Text, typeof(T))));
         }
 
         private void BindCheckBox(CheckBox control, Action<bool> save, bool value)
         {
             control.Checked = value;
-            _saveActions.Add(control, c => save.Invoke(((CheckBox) c).Checked));
+            _saveActions.Add(control, c => save.Invoke(((CheckBox)c).Checked));
         }
 
         private void BindRadioBox(RadioButton control, Action<bool> save, bool value)
         {
             control.Checked = value;
-            _saveActions.Add(control, c => save.Invoke(((RadioButton) c).Checked));
+            _saveActions.Add(control, c => save.Invoke(((RadioButton)c).Checked));
         }
 
-        private void BindListComboBox(ComboBox control, Action<object> save, object[] values, object value, string propertyName = "SelectedItem")
+        private void BindListComboBox<T>(ComboBox comboBox, Action<T> save, IEnumerable<T> values, T value) where T : notnull
         {
-            if (control.DropDownStyle != ComboBoxStyle.DropDownList)
+            if (comboBox.DropDownStyle != ComboBoxStyle.DropDownList)
                 throw new ArgumentOutOfRangeException();
 
-            control.Items.AddRange(values);
-            _saveActions.Add(control, c => save.Invoke(((ComboBox) c).SelectedItem));
-            Load += (_, _) => { control.SelectedItem = value; };
+            var tagItems = values.Select(o => new TagItem<T>(o, o.ToString()!)).ToArray();
+            comboBox.Items.AddRange(tagItems.Cast<object>().ToArray());
+
+            comboBox.ValueMember = nameof(TagItem<T>.Value);
+            comboBox.DisplayMember = nameof(TagItem<T>.Text);
+
+            _saveActions.Add(comboBox, c => save.Invoke(((TagItem<T>)((ComboBox)c).SelectedItem).Value));
+            Load += (_, _) => { comboBox.SelectedItem = tagItems.SingleOrDefault(t => t.Value.Equals(value)); };
         }
 
         private void BindComboBox(ComboBox control, Func<string, bool> check, Action<string> save, string value, object[]? values = null)
@@ -336,7 +327,7 @@ namespace Netch.Forms
             if (values != null)
                 control.Items.AddRange(values);
 
-            _saveActions.Add(control, c => save.Invoke(((ComboBox) c).Text));
+            _saveActions.Add(control, c => save.Invoke(((ComboBox)c).Text));
             _checkActions.Add(control, check.Invoke);
 
             Load += (_, _) => { control.Text = value; };

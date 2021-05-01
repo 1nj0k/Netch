@@ -2,6 +2,7 @@
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Netch.Interfaces;
 using Netch.Utils;
 
 namespace Netch.Controllers
@@ -39,7 +40,7 @@ namespace Netch.Controllers
                 }
                 catch (Exception e)
                 {
-                    Logging.Warning($"写入 {Name} 日志错误：\n" + e.Message);
+                    Global.Logger.Warning($"写入 {Name} 日志错误：\n" + e.Message);
                 }
 
                 if (output.IsNullOrWhiteSpace())
@@ -86,7 +87,7 @@ namespace Netch.Controllers
             }
             catch (Exception e)
             {
-                Logging.Error($"{Name} 控制器出错:\n" + e);
+                Global.Logger.Error($"{Name} 控制器出错:\n" + e);
                 try
                 {
                     Stop();

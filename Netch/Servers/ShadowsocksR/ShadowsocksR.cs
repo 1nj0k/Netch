@@ -1,5 +1,5 @@
-﻿using System.Collections.Generic;
-using Netch.Models;
+﻿using Netch.Models;
+using System.Collections.Generic;
 
 namespace Netch.Servers.ShadowsocksR
 {
@@ -8,24 +8,14 @@ namespace Netch.Servers.ShadowsocksR
         public override string Type { get; } = "SSR";
 
         /// <summary>
-        ///     加密方式
-        /// </summary>
-        public string EncryptMethod { get; set; } = SSRGlobal.EncryptMethods[0];
-
-        /// <summary>
-        ///     混淆
-        /// </summary>
-        public string OBFS { get; set; } = SSRGlobal.OBFSs[0];
-
-        /// <summary>
-        ///     混淆参数
-        /// </summary>
-        public string? OBFSParam { get; set; }
-
-        /// <summary>
         ///     密码
         /// </summary>
         public string Password { get; set; } = string.Empty;
+
+        /// <summary>
+        ///     加密方式
+        /// </summary>
+        public string EncryptMethod { get; set; } = SSRGlobal.EncryptMethods[0];
 
         /// <summary>
         ///     协议
@@ -36,6 +26,16 @@ namespace Netch.Servers.ShadowsocksR
         ///     协议参数
         /// </summary>
         public string? ProtocolParam { get; set; }
+
+        /// <summary>
+        ///     混淆
+        /// </summary>
+        public string OBFS { get; set; } = SSRGlobal.OBFSs[0];
+
+        /// <summary>
+        ///     混淆参数
+        /// </summary>
+        public string? OBFSParam { get; set; }
     }
 
     public class SSRGlobal

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using Netch.Controllers;
+using Netch.Interfaces;
 using Netch.Models;
 using Netch.Servers.V2ray.Utils;
 
@@ -10,9 +11,9 @@ namespace Netch.Servers.V2ray
     {
         public override string MainFile { get; protected set; } = "xray.exe";
 
-        protected override IEnumerable<string> StartedKeywords { get; } = new[] {"started"};
+        protected override IEnumerable<string> StartedKeywords { get; set; } = new[] { "started" };
 
-        protected override IEnumerable<string> StoppedKeywords { get; } = new[] {"config file not readable", "failed to"};
+        protected override IEnumerable<string> StoppedKeywords { get; set; } = new[] { "config file not readable", "failed to" };
 
         public override string Name { get; } = "Xray";
 

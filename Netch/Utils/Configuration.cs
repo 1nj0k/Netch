@@ -1,9 +1,9 @@
-﻿using System;
+﻿using Netch.Models;
+using System;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Netch.Models;
 
 namespace Netch.Utils
 {
@@ -12,12 +12,10 @@ namespace Netch.Utils
         /// <summary>
         ///     数据目录
         /// </summary>
-        public const string DATA_DIR = "data";
+        public static string DataDirectoryFullName => Path.Combine(Global.NetchDir, "data");
 
-        /// <summary>
-        ///     设置
-        /// </summary>
-        public static readonly string SETTINGS_JSON = $"{DATA_DIR}\\settings.json";
+        public static string SettingFileFullName => $"{DataDirectoryFullName}\\settings.json";
+
         private static readonly JsonSerializerOptions JsonSerializerOptions = Global.NewDefaultJsonSerializerOptions;
 
         static Configuration()
@@ -31,45 +29,42 @@ namespace Netch.Utils
         /// </summary>
         public static void Load()
         {
-            if (File.Exists(SETTINGS_JSON))
+            if (File.Exists(SettingFileFullName))
             {
-                Global.Settings = ParseSetting(File.ReadAllText(SETTINGS_JSON));
+                try
+                {
+                    using var fileStream = File.OpenRead(SettingFileFullName);
+                    var settings = JsonSerializer.DeserializeAsync<Setting>(fileStream, JsonSerializerOptions).Result!;
+
+                    CheckSetting(settings);
+
+                    Global.Settings = settings;
+                }
+                catch (Exception e)
+                {
+                    Global.Logger.Error(e.ToString());
+                    Global.Logger.ShowLog();
+                    Environment.Exit(-1);
+                    Global.Settings = null!;
+                }
             }
             else
             {
-                // 弹出提示
-                i18N.Load("System");
-
-                // 创建 data 文件夹并保存默认设置
+                // 保存默认设置
                 Save();
             }
         }
 
-        public static Setting ParseSetting(string text)
+        private static void CheckSetting(Setting settings)
         {
-            try
-            {
-                var settings = JsonSerializer.Deserialize<Setting>(text, JsonSerializerOptions)!;
+            settings.Profiles.RemoveAll(p => p.ServerRemark == string.Empty || p.ModeRemark == string.Empty);
 
-                #region Check Profile
+            if (settings.Profiles.Any(p => settings.Profiles.Any(p1 => p1 != p && p1.Index == p.Index)))
+                for (var i = 0; i < settings.Profiles.Count; i++)
+                    settings.Profiles[i].Index = i;
 
-                settings.Profiles.RemoveAll(p => p.ServerRemark == string.Empty || p.ModeRemark == string.Empty);
-
-                if (settings.Profiles.Any(p => settings.Profiles.Any(p1 => p1 != p && p1.Index == p.Index)))
-                    for (var i = 0; i < settings.Profiles.Count; i++)
-                        settings.Profiles[i].Index = i;
-
-                #endregion
-
-                return settings;
-            }
-            catch (Exception e)
-            {
-                Logging.Error(e.ToString());
-                Utils.Open(Logging.LogFile);
-                Environment.Exit(-1);
-                return null!;
-            }
+            settings.AioDNS.ChinaDNS = Utils.HostAppendPort(settings.AioDNS.ChinaDNS);
+            settings.AioDNS.OtherDNS = Utils.HostAppendPort(settings.AioDNS.OtherDNS);
         }
 
         /// <summary>
@@ -77,10 +72,11 @@ namespace Netch.Utils
         /// </summary>
         public static void Save()
         {
-            if (!Directory.Exists(DATA_DIR))
-                Directory.CreateDirectory(DATA_DIR);
+            if (!Directory.Exists(DataDirectoryFullName))
+                Directory.CreateDirectory(DataDirectoryFullName);
 
-            File.WriteAllBytes(SETTINGS_JSON, JsonSerializer.SerializeToUtf8Bytes(Global.Settings, JsonSerializerOptions));
+            using var fileStream = File.Create(SettingFileFullName);
+            JsonSerializer.SerializeAsync(fileStream, Global.Settings, JsonSerializerOptions).Wait();
         }
     }
 }

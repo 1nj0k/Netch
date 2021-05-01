@@ -1,8 +1,8 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Netch.Controllers;
+using Netch.Interfaces;
 using Netch.Models;
 using Netch.Servers.Shadowsocks;
 using Netch.Servers.Socks5;
@@ -11,98 +11,88 @@ namespace Netch.Utils
 {
     public static class ModeHelper
     {
-        private const string MODE_DIR = "mode";
+        public const string DisableModeDirectoryFileName = "disabled";
 
-        public static readonly string ModeDirectory = Path.Combine(Global.NetchDir, $"{MODE_DIR}\\");
+        public static string ModeDirectoryFullName => Path.Combine(Global.NetchDir, "mode");
+
+        private static readonly FileSystemWatcher FileSystemWatcher;
+
+        public static bool SuspendWatcher { get; set; } = false;
+
+        static ModeHelper()
+        {
+            FileSystemWatcher = new FileSystemWatcher(ModeDirectoryFullName)
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
+                IncludeSubdirectories = true,
+                EnableRaisingEvents = true
+            };
+
+            FileSystemWatcher.Changed += OnModeChanged;
+            FileSystemWatcher.Created += OnModeChanged;
+            FileSystemWatcher.Deleted += OnModeChanged;
+            FileSystemWatcher.Renamed += OnModeChanged;
+        }
+
+        private static void OnModeChanged(object sender, FileSystemEventArgs e)
+        {
+            if (SuspendWatcher)
+                return;
+
+            Load();
+            Global.MainForm.LoadModes();
+        }
 
         public static string GetRelativePath(string fullName)
         {
-            return fullName.Substring(ModeDirectory.Length);
+            var length = ModeDirectoryFullName.Length;
+            if (!ModeDirectoryFullName.EndsWith("\\"))
+                length++;
+
+            return fullName.Substring(length);
         }
 
         public static string GetFullPath(string relativeName)
         {
-            return Path.Combine(ModeDirectory, relativeName);
-        }
-
-        public static string GetFullPath(Mode mode)
-        {
-            return Path.Combine(ModeDirectory, mode.RelativePath);
+            return Path.Combine(ModeDirectoryFullName, relativeName);
         }
 
         /// <summary>
-        ///     从模式文件夹读取模式并为 <see cref="Forms.MainForm.ModeComboBox" /> 绑定数据
+        ///     从模式文件夹读取模式
         /// </summary>
         public static void Load()
         {
             Global.Modes.Clear();
-
-            if (!Directory.Exists(MODE_DIR))
-                return;
-
-            var stack = new Stack<string>();
-            stack.Push(MODE_DIR);
-            while (stack.Count > 0)
-            {
-                var dirInfo = new DirectoryInfo(stack.Pop());
-                try
-                {
-                    foreach (var childDirInfo in dirInfo.GetDirectories())
-                        stack.Push(childDirInfo.FullName);
-
-                    foreach (var childFileInfo in dirInfo.GetFiles().Where(info => info.Name.EndsWith(".txt")))
-                        LoadModeFile(childFileInfo.FullName);
-                }
-                catch
-                {
-                    // ignored
-                }
-            }
+            LoadModeDirectory(ModeDirectoryFullName);
 
             Sort();
         }
 
-        private static void LoadModeFile(string fullName)
+        private static void LoadModeDirectory(string modeDirectory)
         {
-            var mode = new Mode(fullName);
-
-            var content = File.ReadAllLines(fullName);
-            if (content.Length == 0)
-                return;
-
-            for (var i = 0; i < content.Length; i++)
+            try
             {
-                var text = content[i].Trim();
+                foreach (var directory in Directory.GetDirectories(modeDirectory))
+                    LoadModeDirectory(directory);
 
-                if (i == 0)
-                {
-                    if (text.First() != '#')
-                        return;
+                // skip Directory with a disabled file in
+                if (File.Exists(Path.Combine(modeDirectory, DisableModeDirectoryFileName)))
+                    return;
 
+                foreach (var file in Directory.GetFiles(modeDirectory).Where(f => f.EndsWith(".txt")))
                     try
                     {
-                        var splited = text.Substring(1).SplitTrimEntries(',');
-
-                        mode.Remark = splited[0];
-
-                        var typeResult = int.TryParse(splited.ElementAtOrDefault(1), out var type);
-                        mode.Type = typeResult ? type : 0;
-
-                        var bypassChinaResult = int.TryParse(splited.ElementAtOrDefault(2), out var bypassChina);
-                        mode.BypassChina = mode.ClientRouting() && bypassChinaResult && bypassChina == 1;
+                        Global.Modes.Add(new Mode(file));
                     }
-                    catch
+                    catch (Exception e)
                     {
-                        return;
+                        Global.Logger.Warning($"Load mode \"{file}\" failed: {e.Message}");
                     }
-                }
-                else
-                {
-                    mode.Rule.Add(text);
-                }
             }
-
-            Global.Modes.Add(mode);
+            catch
+            {
+                // ignored
+            }
         }
 
         private static void Sort()
@@ -110,65 +100,50 @@ namespace Netch.Utils
             Global.Modes.Sort((a, b) => string.Compare(a.Remark, b.Remark, StringComparison.Ordinal));
         }
 
-        public static void Add(Mode mode)
-        {
-            Global.Modes.Add(mode);
-            Sort();
-            Global.MainForm.LoadModes();
-        }
-
         public static void Delete(Mode mode)
         {
-            var fullName = GetFullPath(mode);
-            if (File.Exists(fullName))
-                File.Delete(fullName);
+            if (mode.FullName == null)
+                throw new ArgumentException(nameof(mode.FullName));
 
-            Global.Modes.Remove(mode);
-            Global.MainForm.LoadModes();
+            File.Delete(mode.FullName);
         }
 
         public static bool SkipServerController(Server server, Mode mode)
         {
-            return mode.Type switch
-                   {
-                       0 => server switch
-                            {
-                                Socks5 => true,
-                                Shadowsocks shadowsocks when !shadowsocks.HasPlugin() && Global.Settings.RedirectorSS => true,
-                                _ => false
-                            },
-                       _ => false
-                   };
+            switch (mode.Type)
+            {
+                case 0:
+                    return server switch
+                    {
+                        Socks5 => true,
+                        Shadowsocks shadowsocks when !shadowsocks.HasPlugin() && Global.Settings.Redirector.RedirectorSS => true,
+                        _ => false
+                    };
+                case 1:
+                case 2:
+                    return server is Socks5;
+                default:
+                    return false;
+            }
         }
 
-        public static IModeController? GetModeControllerByType(int type, out ushort? port, out string portName, out PortType portType)
+        public static readonly int[] ModeTypes = { 0, 1, 2, 6 };
+
+        public static IModeController GetModeControllerByType(int type, out ushort? port, out string portName)
         {
             port = null;
             portName = string.Empty;
-            portType = PortType.Both;
             switch (type)
             {
                 case 0:
-                    port = Global.Settings.RedirectorTCPPort;
-                    portName = "Redirector TCP";
-                    portType = PortType.TCP;
                     return new NFController();
                 case 1:
                 case 2:
-                    return new TUNTAPController();
-                case 3:
-                case 5:
-                    port = Global.Settings.HTTPLocalPort;
-                    portName = "HTTP";
-                    portType = PortType.TCP;
-                    StatusPortInfoText.HttpPort = (ushort) port;
-                    return new HTTPController();
-                case 4:
-                    return null;
+                    return new TUNController();
                 case 6:
                     return new PcapController();
                 default:
-                    Logging.Error("未知模式类型");
+                    Global.Logger.Error("未知模式类型");
                     throw new MessageException("未知模式类型");
             }
         }

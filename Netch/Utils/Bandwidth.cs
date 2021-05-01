@@ -1,12 +1,11 @@
-﻿using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.Diagnostics.Tracing.Parsers;
+﻿using Microsoft.Diagnostics.Tracing.Parsers;
 using Microsoft.Diagnostics.Tracing.Session;
 using Netch.Controllers;
 using Netch.Models;
-using Netch.Servers.Shadowsocks;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace Netch.Utils
 {
@@ -15,7 +14,7 @@ namespace Netch.Utils
         public static ulong received;
         public static TraceEventSession? tSession;
 
-        private static readonly string[] Suffix = {"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"};
+        private static readonly string[] Suffix = { "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB" };
 
         /// <summary>
         ///     计算流量
@@ -45,7 +44,7 @@ namespace Netch.Utils
         /// </summary>
         public static void NetTraffic()
         {
-            if (!Global.Flags.IsWindows10Upper)
+            if (!Flags.IsWindows10Upper)
                 return;
 
             var counterLock = new object();
@@ -56,9 +55,6 @@ namespace Netch.Utils
             switch (MainController.ServerController)
             {
                 case null:
-                    break;
-                case SSController {DllFlag: true}:
-                    instances.Add(Process.GetCurrentProcess());
                     break;
                 case Guard instanceController:
                     if (instanceController.Instance != null)
@@ -72,9 +68,6 @@ namespace Netch.Utils
                 {
                     case null:
                         break;
-                    case HTTPController httpController:
-                        instances.Add(httpController.PrivoxyController.Instance!);
-                        break;
                     case NFController _:
                         instances.Add(Process.GetCurrentProcess());
                         break;
@@ -85,7 +78,7 @@ namespace Netch.Utils
 
             var processList = instances.Select(instance => instance.Id).ToList();
 
-            Logging.Info("流量统计进程:" + string.Join(",", instances.Select(instance => $"({instance.Id})" + instance.ProcessName).ToArray()));
+            Global.Logger.Info("流量统计进程:" + string.Join(",", instances.Select(instance => $"({instance.Id})" + instance.ProcessName).ToArray()));
 
             received = 0;
 
@@ -105,7 +98,7 @@ namespace Netch.Utils
                 {
                     if (processList.Contains(data.ProcessID))
                         lock (counterLock)
-                            received += (ulong) data.size;
+                            received += (ulong)data.size;
 
                     // Debug.WriteLine($"TcpIpRecv: {ToByteSize(data.size)}");
                 };
@@ -114,7 +107,7 @@ namespace Netch.Utils
                 {
                     if (processList.Contains(data.ProcessID))
                         lock (counterLock)
-                            received += (ulong) data.size;
+                            received += (ulong)data.size;
 
                     // Debug.WriteLine($"UdpIpRecv: {ToByteSize(data.size)}");
                 };

@@ -1,9 +1,9 @@
+using Netch.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
-using Netch.Models;
 
 namespace Netch.Utils
 {
@@ -53,7 +53,7 @@ namespace Netch.Utils
             catch (Exception e)
             {
                 Global.MainForm.NotifyTip($"{i18N.TranslateFormat("Update servers error from {0}", item.Remark)}\n{e.Message}", info: false);
-                Logging.Error(e.ToString());
+                Global.Logger.Error(e.ToString());
             }
         }
     }
